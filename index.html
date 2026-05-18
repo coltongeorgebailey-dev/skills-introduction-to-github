@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#3d7a32">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <title>Farm Sim 🌾</title>
+</head>
+<body>
+
+  <!-- HUD Overlay -->
+  <div id="hud">
+    <div id="hud-left">
+      <span id="hud-day">Day 1</span>
+      <span id="hud-coins">🪙 100</span>
+      <span id="hud-gems">💎 10</span>
+    </div>
+    <div id="hud-right">
+      <span id="hud-tool">Hand Hoe</span>
+      <span id="hud-seed"></span>
+    </div>
+  </div>
+
+  <!-- Game Canvas -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- Notification toast -->
+  <div id="notification"></div>
+
+  <!-- Bottom Tab Bar -->
+  <nav id="tab-bar">
+    <button class="tab-btn active" data-view="farm">🌾<br><small>Farm</small></button>
+    <button class="tab-btn" data-view="home">🏠<br><small>Home</small></button>
+    <button class="tab-btn" data-view="shop">🛒<br><small>Market</small></button>
+    <button class="tab-btn" data-view="progression">⭐<br><small>Upgrades</small></button>
+    <button class="tab-btn" data-view="skins">🎨<br><small>Skins</small></button>
+    <button class="tab-btn" data-view="gems">💎<br><small>Gems</small></button>
+  </nav>
+
+  <!-- Tool Bar -->
+  <div id="toolbar-wrap">
+    <div id="toolbar"></div>
+    <div id="toolbar-actions">
+      <button id="btn-sleep" title="Sleep (E)">😴 Sleep</button>
+      <button id="btn-furniture" title="Place Furniture">🪑 Furnish</button>
+    </div>
+  </div>
+
+  <!-- D-Pad (mobile movement) -->
+  <div id="dpad">
+    <button id="dpad-up">▲</button>
+    <div id="dpad-mid">
+      <button id="dpad-left">◀</button>
+      <div id="dpad-center"></div>
+      <button id="dpad-right">▶</button>
+    </div>
+    <button id="dpad-down">▼</button>
+  </div>
+
+  <!-- Modals -->
+  <div id="modal-shop" class="modal"></div>
+  <div id="modal-progression" class="modal"></div>
+  <div id="modal-skins" class="modal"></div>
+  <div id="modal-furniture" class="modal"></div>
+  <div id="modal-gems" class="modal"></div>
+
+  <!-- Controls help -->
+  <div id="controls-help">
+    <strong>Controls:</strong> WASD/Arrows = Move &nbsp;|&nbsp; 1=Hoe 2=Water 3=Seed 4=Harvest &nbsp;|&nbsp; Q=Cycle seed &nbsp;|&nbsp; E=Sleep &nbsp;|&nbsp; Tap tile = Use tool
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
