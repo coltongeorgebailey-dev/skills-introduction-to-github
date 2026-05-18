@@ -30,6 +30,8 @@ function init() {
   setupSleepBtn();
   setupMuteBtn();
   setupMobileControls();
+  setupSeedCarousel();
+  setupMoreSheet();
 
   // First-run tutorial
   if (!game.tutorialSeen) {
@@ -39,7 +41,7 @@ function init() {
     });
   }
 
-  // Daily login gem reward (doesn't advance the farm or day counter)
+  // Daily login gem reward
   const today = new Date().toDateString();
   if (game.lastLoginDate !== today) {
     game.lastLoginDate = today;
@@ -72,31 +74,25 @@ function loop(timestamp) {
 function processInput(dt) {
   if (currentView !== 'farm') return;
 
-  // Movement
   const { dx, dy } = input.getMoveDelta();
   game.player.move(dx, dy, game.farm, dt);
 
   clampCamera();
 
-  // Tool selection keys
-  if (input.wasPressed('1')) { game.player.tool = 'hoe'; syncToolBar(); }
-  if (input.wasPressed('2')) { game.player.tool = 'water'; syncToolBar(); }
-  if (input.wasPressed('3')) { game.player.tool = 'seed'; syncToolBar(); }
-  if (input.wasPressed('4')) { game.player.tool = 'scythe'; syncToolBar(); }
+  if (input.wasPressed('1')) { game.player.tool = 'hoe';     syncToolBar(); }
+  if (input.wasPressed('2')) { game.player.tool = 'water';   syncToolBar(); }
+  if (input.wasPressed('3')) { game.player.tool = 'seed';    syncToolBar(); }
+  if (input.wasPressed('4')) { game.player.tool = 'scythe';  syncToolBar(); }
   if (input.wasPressed('5')) { game.player.tool = 'fishing'; syncToolBar(); }
 
   if (input.wasPressed('q') || input.wasPressed('Q')) {
     game.player.cycleSeed(Object.keys(CROPS));
+    syncSeedCarousel();
   }
-  if (input.wasPressed('e') || input.wasPressed('E')) {
-    doSleep();
-  }
-  if (input.wasPressed('b') || input.wasPressed('B')) {
-    openShopModal();
-  }
-  if (input.wasPressed('Escape')) { ui.closeAllModals(); }
+  if (input.wasPressed('e') || input.wasPressed('E')) { doSleep(); }
+  if (input.wasPressed('b') || input.wasPressed('B')) { openShopModal(); }
+  if (input.wasPressed('Escape')) { ui.closeAllModals(); closeMoreSheet(); }
 
-  // Click / tap → use tool on tile
   if (input.mouse.clicked) {
     handleCanvasClick(input.mouse.x, input.mouse.y);
   }
@@ -114,15 +110,13 @@ function handleCanvasClick(screenX, screenY) {
 
   if (currentView !== 'farm') return;
 
-  // Fishing rod + pond click
   if (game.player.tool === 'fishing') {
     if (renderer.isPondClick(screenX, screenY, game.farm)) {
       openFishingGame();
-      return;
     } else {
       ui.notify('Walk to the pond to fish! 🎣');
-      return;
     }
+    return;
   }
 
   const { tileX, tileY } = renderer.pixelToTile(game.farm, screenX, screenY);
@@ -139,7 +133,6 @@ function _tileScreenCenter(tx, ty) {
 function useTool(tx, ty) {
   const { player, farm } = game;
 
-  // Face the tapped tile (don't teleport the player across the farm)
   if (tx >= 0 && ty >= 0 && tx < farm.cols && ty < farm.rows) {
     const ddx = tx - player.gridX, ddy = ty - player.gridY;
     if (Math.abs(ddx) > Math.abs(ddy)) { player.facingDX = Math.sign(ddx); player.facingDY = 0; }
@@ -224,6 +217,29 @@ function openShopModal() {
   );
 }
 
+function openProgressionModal() {
+  ui.openProgression(game,
+    (id, gems) => game.unlockFarmSize(id, gems),
+    (tool, tier, gems) => game.unlockMachinery(tool, tier, gems),
+    {
+      onStartCraft: (slot, recipe) => game.startCraft(slot, recipe),
+      onCollect: (slot) => game.collectCraft(slot),
+      onUnlockSlot: () => game.unlockExtraCraftSlot(),
+    }
+  );
+}
+
+function openSkinsModal() {
+  ui.openSkins(game,
+    (id, cat) => game.buySkin(id, cat),
+    (cat, id) => {
+      if (cat === 'player') game.player.skin = id;
+      else game.houseSkin = id;
+      game.autoSave();
+    }
+  );
+}
+
 function placeFurniture(def, tileX, tileY) {
   if (game.coins < def.cost) { ui.notify('Not enough coins!'); return; }
   game.coins -= def.cost;
@@ -249,6 +265,61 @@ function clampCamera() {
 function syncToolBar() {
   const tool = game.player.tool;
   document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  syncSeedCarousel();
+}
+
+const CROP_ICONS = { wheat: '🌾', tomato: '🍅', corn: '🌽', pumpkin: '🎃', golden_wheat: '✨' };
+
+function syncSeedCarousel() {
+  const carousel = document.getElementById('seed-carousel');
+  const label = document.getElementById('seed-label');
+  if (!carousel) return;
+  const isSeed = game.player.tool === 'seed';
+  carousel.style.display = isSeed ? 'flex' : 'none';
+  if (isSeed && label) {
+    const kind = game.player.selectedSeed;
+    const def = CROPS[kind];
+    const icon = CROP_ICONS[kind] || '🌱';
+    label.textContent = def ? `${icon} ${def.label}` : kind;
+  }
+}
+
+function setupSeedCarousel() {
+  const seedKeys = Object.keys(CROPS);
+  document.getElementById('seed-prev')?.addEventListener('click', () => {
+    const cur = seedKeys.indexOf(game.player.selectedSeed);
+    game.player.selectedSeed = seedKeys[(cur - 1 + seedKeys.length) % seedKeys.length];
+    syncSeedCarousel();
+  });
+  document.getElementById('seed-next')?.addEventListener('click', () => {
+    const cur = seedKeys.indexOf(game.player.selectedSeed);
+    game.player.selectedSeed = seedKeys[(cur + 1) % seedKeys.length];
+    syncSeedCarousel();
+  });
+}
+
+function openMoreSheet() {
+  document.getElementById('sheet-more')?.classList.add('open');
+  document.getElementById('sheet-overlay')?.classList.add('active');
+}
+
+function closeMoreSheet() {
+  document.getElementById('sheet-more')?.classList.remove('open');
+  document.getElementById('sheet-overlay')?.classList.remove('active');
+}
+
+function setupMoreSheet() {
+  document.getElementById('sheet-overlay')?.addEventListener('click', closeMoreSheet);
+
+  document.querySelectorAll('.sheet-option-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      closeMoreSheet();
+      const modal = btn.dataset.modal;
+      if (modal === 'progression') openProgressionModal();
+      else if (modal === 'skins') openSkinsModal();
+      else if (modal === 'gems') ui.openGemStore(game);
+    });
+  });
 }
 
 function setupTabBar() {
@@ -256,8 +327,14 @@ function setupTabBar() {
   tabs.forEach(btn => {
     btn.addEventListener('click', () => {
       const view = btn.dataset.view;
-      tabs.forEach(t => t.classList.toggle('active', t.dataset.view === view));
       pendingFurniture = null;
+
+      if (view === 'more') {
+        openMoreSheet();
+        return;
+      }
+
+      tabs.forEach(t => t.classList.toggle('active', t.dataset.view === view));
 
       if (view === 'farm') {
         currentView = 'farm';
@@ -285,33 +362,6 @@ function setupTabBar() {
         currentView = 'farm';
         tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
         openShopModal();
-      } else if (view === 'progression') {
-        currentView = 'farm';
-        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
-        ui.openProgression(game,
-          (id, gems) => game.unlockFarmSize(id, gems),
-          (tool, tier, gems) => game.unlockMachinery(tool, tier, gems),
-          {
-            onStartCraft: (slot, recipe) => game.startCraft(slot, recipe),
-            onCollect: (slot) => game.collectCraft(slot),
-            onUnlockSlot: () => game.unlockExtraCraftSlot(),
-          }
-        );
-      } else if (view === 'skins') {
-        currentView = 'farm';
-        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
-        ui.openSkins(game,
-          (id, cat) => game.buySkin(id, cat),
-          (cat, id) => {
-            if (cat === 'player') game.player.skin = id;
-            else game.houseSkin = id;
-            game.autoSave();
-          }
-        );
-      } else if (view === 'gems') {
-        currentView = 'farm';
-        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
-        ui.openGemStore(game);
       }
     });
   });
@@ -319,19 +369,19 @@ function setupTabBar() {
 
 function setupToolBar() {
   const toolDefs = [
-    { id: 'hoe',     icon: '⛏',  key: '1' },
-    { id: 'water',   icon: '💧',  key: '2' },
-    { id: 'seed',    icon: '🌱',  key: '3' },
-    { id: 'scythe',  icon: '🌾',  key: '4' },
-    { id: 'fishing', icon: '🎣',  key: '5' },
+    { id: 'hoe',     icon: '⛏',  label: 'Hoe',    key: '1' },
+    { id: 'water',   icon: '💧',  label: 'Water',  key: '2' },
+    { id: 'seed',    icon: '🌱',  label: 'Seed',   key: '3' },
+    { id: 'scythe',  icon: '🌾',  label: 'Harvest',key: '4' },
+    { id: 'fishing', icon: '🎣',  label: 'Fish',   key: '5' },
   ];
   const bar = document.getElementById('toolbar');
-  toolDefs.forEach(({ id, icon, key }) => {
+  toolDefs.forEach(({ id, icon, label, key }) => {
     const btn = document.createElement('button');
     btn.className = 'tool-btn';
     btn.dataset.tool = id;
-    btn.innerHTML = `<span class="tool-icon">${icon}</span><span class="tool-key">${key}</span>`;
-    btn.title = `${id} (${key})`;
+    btn.title = `${label} (${key})`;
+    btn.innerHTML = `<span class="tool-icon">${icon}</span><span class="tool-label">${label}</span>`;
     btn.addEventListener('click', () => {
       game.player.tool = id;
       if (id === 'seed') game.player.cycleSeed(Object.keys(CROPS));
@@ -343,11 +393,7 @@ function setupToolBar() {
 }
 
 function setupSleepBtn() {
-  document.getElementById('btn-sleep').addEventListener('click', doSleep);
-  document.getElementById('btn-furniture').addEventListener('click', () => {
-    if (currentView !== 'home') { currentView = 'home'; }
-    ui.openFurniturePicker(game, def => { pendingFurniture = def; });
-  });
+  document.getElementById('btn-sleep')?.addEventListener('click', doSleep);
 }
 
 function setupMuteBtn() {
