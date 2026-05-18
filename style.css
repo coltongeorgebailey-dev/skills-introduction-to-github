@@ -1,0 +1,359 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --green-dark:  #2d5a1b;
+  --green-mid:   #3d7a32;
+  --green-light: #5a9e4a;
+  --soil:        #8B5E3C;
+  --gold:        #f5c842;
+  --gem:         #66ccff;
+  --bg:          #1c2a0e;
+  --surface:     #162008;
+  --text:        #eee;
+  --tab-h:       62px;
+  --toolbar-h:   56px;
+  --hud-h:       44px;
+  --accent:      #e8a030;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  touch-action: none;
+  image-rendering: pixelated;
+}
+
+/* ── HUD ──────────────────────────────────────────────────────── */
+#hud {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--hud-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  background: linear-gradient(to bottom, rgba(10,20,5,0.92), rgba(10,20,5,0.7));
+  border-bottom: 2px solid rgba(90,158,74,0.4);
+  z-index: 10;
+  gap: 8px;
+}
+#hud-left, #hud-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#hud-day {
+  color: #ffe066; font-weight: 700;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  font-size: 1em;
+}
+#hud-coins { color: #f5c842; text-shadow: 0 1px 3px rgba(0,0,0,0.8); font-weight: 600; }
+#hud-gems  { color: #66ccff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); font-weight: 600; }
+#hud-tool  { color: #aaffaa; font-weight: 600; font-size: 0.9em; }
+#hud-seed  { color: #88ee88; font-size: 0.82em; }
+#btn-mute {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 16px;
+  padding: 2px 6px;
+  cursor: pointer;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Canvas ───────────────────────────────────────────────────── */
+#game-canvas {
+  position: fixed;
+  top: var(--hud-h);
+  left: 0;
+  right: 0;
+  bottom: calc(var(--tab-h) + var(--toolbar-h));
+  width: 100%;
+  height: calc(100% - var(--hud-h) - var(--tab-h) - var(--toolbar-h));
+  display: block;
+  cursor: crosshair;
+  image-rendering: pixelated;
+}
+
+/* ── Tab Bar ──────────────────────────────────────────────────── */
+#tab-bar {
+  position: fixed;
+  bottom: var(--toolbar-h);
+  left: 0; right: 0;
+  height: var(--tab-h);
+  display: flex;
+  background: linear-gradient(to top, rgba(8,16,4,0.97), rgba(14,26,8,0.93));
+  border-top: 2px solid rgba(90,158,74,0.35);
+  z-index: 10;
+}
+.tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  border-right: 1px solid rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.45);
+  font-size: 17px;
+  line-height: 1.2;
+  cursor: pointer;
+  padding: 6px 2px;
+  transition: color 0.12s, background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.tab-btn small { font-size: 9px; display: block; letter-spacing: 0.02em; }
+.tab-btn.active {
+  color: #ffe066;
+  background: rgba(90,158,74,0.18);
+  border-top: 2px solid #f5c842;
+}
+.tab-btn:hover { color: #fff; background: rgba(255,255,255,0.06); }
+
+/* ── Toolbar ──────────────────────────────────────────────────── */
+#toolbar-wrap {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: var(--toolbar-h);
+  background: linear-gradient(to top, rgba(4,10,2,0.98), rgba(10,18,6,0.95));
+  border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  z-index: 10;
+}
+#toolbar { display: flex; gap: 5px; }
+.tool-btn {
+  background: rgba(255,255,255,0.08);
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 18px;
+  width: 44px; height: 44px;
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.12s, background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.tool-btn.active {
+  border-color: #f5c842;
+  background: rgba(245,200,66,0.18);
+  box-shadow: 0 0 8px rgba(245,200,66,0.3), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+.tool-btn:hover { border-color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.14); }
+.tool-key {
+  position: absolute;
+  bottom: 2px; right: 3px;
+  font-size: 8px;
+  color: rgba(255,255,255,0.4);
+  font-weight: bold;
+}
+#toolbar-actions { display: flex; gap: 5px; margin-left: auto; }
+#toolbar-actions button {
+  background: rgba(90,158,74,0.25);
+  border: 1px solid rgba(90,158,74,0.5);
+  border-radius: 8px;
+  color: #cceebb;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  font-weight: 600;
+}
+#toolbar-actions button:hover { background: rgba(90,158,74,0.4); color: #fff; }
+
+/* ── D-Pad ────────────────────────────────────────────────────── */
+#dpad {
+  position: fixed;
+  left: 12px;
+  bottom: calc(var(--tab-h) + var(--toolbar-h) + 12px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  z-index: 9;
+  opacity: 0.7;
+}
+#dpad-mid { display: flex; align-items: center; gap: 3px; }
+#dpad-center { width: 48px; height: 48px; }
+#dpad button {
+  width: 48px; height: 48px;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+@media (min-width: 900px) { #dpad { display: none; } }
+
+/* ── Controls help ────────────────────────────────────────────── */
+#controls-help {
+  position: fixed;
+  top: calc(var(--hud-h) + 4px);
+  right: 8px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+  z-index: 8;
+  max-width: 320px;
+  text-align: right;
+  pointer-events: none;
+}
+@media (max-width: 600px) { #controls-help { display: none; } }
+
+/* ── Notification Toast ───────────────────────────────────────── */
+#notification {
+  position: fixed;
+  top: calc(var(--hud-h) + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  background: rgba(0,0,0,0.85);
+  color: #fff;
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.25s, transform 0.25s;
+  pointer-events: none;
+  z-index: 100;
+  white-space: nowrap;
+  max-width: 90vw;
+  text-align: center;
+}
+#notification.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ── Modals ───────────────────────────────────────────────────── */
+.modal {
+  display: none;
+  position: fixed;
+  top: var(--hud-h);
+  left: 0; right: 0;
+  bottom: calc(var(--tab-h) + var(--toolbar-h));
+  background: rgba(10,14,30,0.97);
+  overflow-y: auto;
+  padding: 16px;
+  z-index: 50;
+  flex-direction: column;
+  gap: 8px;
+}
+.modal.active { display: flex; }
+
+.modal h2 {
+  font-size: 1.3em;
+  margin-bottom: 4px;
+  color: var(--green-light);
+}
+.modal h3 {
+  font-size: 1em;
+  margin: 12px 0 4px;
+  color: var(--gold);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 4px;
+}
+.modal p { color: rgba(255,255,255,0.6); }
+
+.shop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-wrap: wrap;
+}
+.shop-row span:first-child { flex: 1; font-weight: 500; }
+.shop-row span:nth-child(2) { color: rgba(255,255,255,0.6); font-size: 0.9em; min-width: 80px; text-align: right; }
+.shop-row button {
+  background: var(--green-dark);
+  border: 1px solid var(--green-light);
+  border-radius: 6px;
+  color: #fff;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.shop-row button:hover { background: var(--green-mid); }
+
+.modal-close {
+  position: absolute;
+  top: 12px; right: 12px;
+  background: rgba(255,255,255,0.1);
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  width: 32px; height: 32px;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 32px;
+  text-align: center;
+}
+.modal-close:hover { background: rgba(255,0,0,0.3); }
+
+/* ── Scrollbar ────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+
+/* ── Season HUD ────────────────────────────────────────────────── */
+#hud-season {
+  color: #aaddff;
+  font-size: 0.82em;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+
+/* ── Quest Badge ───────────────────────────────────────────────── */
+#quest-badge {
+  background: #e84040;
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 4px;
+  font-size: 9px;
+  vertical-align: top;
+  margin-left: 2px;
+}
+
+/* ── First-Run Tutorial ────────────────────────────────────────── */
+#modal-tutorial { background: rgba(8,14,4,0.98); }
+.tutorial-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  line-height: 1.4;
+}
+.tutorial-step .tutorial-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+  width: 30px;
+  text-align: center;
+}
+.tutorial-step em { color: #ffd24a; font-style: normal; }
+.tutorial-start {
+  display: block;
+  margin: 18px auto 6px;
+  padding: 14px 32px;
+  font-size: 16px;
+  font-weight: 700;
+  background: var(--green-mid);
+  border: 2px solid var(--green-light);
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tutorial-start:hover { background: var(--green-light); }
