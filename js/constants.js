@@ -12,8 +12,8 @@ export const FARM_SIZES = [
 export const CROPS = {
   wheat:        { label: 'Wheat',        daysToGrow: 3,  seedCost: 5,   sellPrice: 12,  gemSeedCost: null, color: '#f5c842', darkColor: '#c8a020', seasons: null,              growMs: 180000,  waterIntervalMs: 120000 },
   tomato:       { label: 'Tomato',       daysToGrow: 5,  seedCost: 10,  sellPrice: 28,  gemSeedCost: null, color: '#e84040', darkColor: '#b02020', seasons: ['Spring','Summer'], growMs: 300000,  waterIntervalMs: 120000 },
-  corn:         { label: 'Corn',         daysToGrow: 7,  seedCost: 15,  sellPrice: 55,  gemSeedCost: null, color: '#f0d050', darkColor: '#c8a800', seasons: ['Summer','Fall'],  growMs: 420000,  waterIntervalMs: 120000 },
-  pumpkin:      { label: 'Pumpkin',      daysToGrow: 10, seedCost: 20,  sellPrice: 100, gemSeedCost: null, color: '#e87820', darkColor: '#b05010', seasons: ['Fall'],           growMs: 720000,  waterIntervalMs: 120000 },
+  corn:         { label: 'Corn',         daysToGrow: 7,  seedCost: 15,  sellPrice: 70,  gemSeedCost: null, color: '#f0d050', darkColor: '#c8a800', seasons: ['Summer','Fall'],  growMs: 420000,  waterIntervalMs: 120000 },
+  pumpkin:      { label: 'Pumpkin',      daysToGrow: 10, seedCost: 20,  sellPrice: 140, gemSeedCost: null, color: '#e87820', darkColor: '#b05010', seasons: ['Fall'],           growMs: 720000,  waterIntervalMs: 120000 },
   golden_wheat: { label: 'Golden Wheat', daysToGrow: 2,  seedCost: 0,   sellPrice: 80,  gemSeedCost: 5,    color: '#ffe066', darkColor: '#d4a800', seasons: null,              growMs: 120000,  waterIntervalMs: 120000 },
 };
 
@@ -26,7 +26,7 @@ export const MACHINERY = {
   wateringCan: [
     { tier: 1, name: 'Watering Can', aoe: 1,   unlockCoins: 0,    unlockGems: 0   },
     { tier: 2, name: 'Sprinkler',    aoe: 4,   unlockCoins: 800,  unlockGems: 30  },
-    { tier: 3, name: 'Auto-Drip',    aoe: 999, unlockCoins: 8000, unlockGems: 200 },
+    { tier: 3, name: 'Auto-Drip',    aoe: 999, unlockCoins: 3500, unlockGems: 120 },
   ],
   harvester: [
     { tier: 1, name: 'Scythe',     aoe: 1, unlockCoins: 0,    unlockGems: 0  },
@@ -129,6 +129,10 @@ export const QUESTS = [
 
 // ── Misc ─────────────────────────────────────────────────────────────────────
 
+// One in-game day passes automatically every DAY_MS of real time.
+// Seasons, weather, animals, crafting and quests all advance off this clock.
+export const DAY_MS = 60000; // 1 real minute = 1 game day
+export const OFFLINE_DAY_CAP = 20; // max days to fast-forward when returning
 export const DAILY_GEM_REWARD = 3;
 export const STARTING_COINS = 100;
 export const STARTING_GEMS = 10;

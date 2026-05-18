@@ -170,15 +170,15 @@ html, body {
   z-index: 9;
   opacity: 0.7;
 }
-#dpad-mid { display: flex; align-items: center; gap: 2px; }
-#dpad-center { width: 36px; height: 36px; }
+#dpad-mid { display: flex; align-items: center; gap: 3px; }
+#dpad-center { width: 48px; height: 48px; }
 #dpad button {
-  width: 36px; height: 36px;
+  width: 48px; height: 48px;
   background: rgba(0,0,0,0.5);
   border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 6px;
+  border-radius: 8px;
   color: #fff;
-  font-size: 14px;
+  font-size: 18px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
@@ -315,78 +315,34 @@ html, body {
   margin-left: 2px;
 }
 
-/* ── Quest Log ─────────────────────────────────────────────────── */
-.quest-item {
+/* ── First-Run Tutorial ────────────────────────────────────────── */
+#modal-tutorial { background: rgba(8,14,4,0.98); }
+.tutorial-step {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  line-height: 1.4;
 }
-.quest-item .quest-info { flex: 1; }
-.quest-item .quest-label { font-weight: 600; font-size: 0.95em; }
-.quest-item .quest-desc  { color: rgba(255,255,255,0.55); font-size: 0.82em; margin-top: 2px; }
-.quest-item .quest-reward { color: #f5c842; font-size: 0.82em; }
-.quest-item button {
-  background: var(--green-dark);
-  border: 1px solid var(--green-light);
-  border-radius: 6px;
-  color: #fff;
-  padding: 5px 10px;
-  cursor: pointer;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.quest-item button:disabled { opacity: 0.4; cursor: default; }
-.quest-item.completed { opacity: 0.5; }
-
-/* ── Barn ──────────────────────────────────────────────────────── */
-.animal-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 10px;
-  margin-bottom: 8px;
-}
-.animal-card .animal-info { flex: 1; }
-.animal-card .animal-name { font-weight: 700; }
-.animal-card .animal-status { font-size: 0.82em; color: rgba(255,255,255,0.55); margin-top: 2px; }
-.animal-card button {
-  background: var(--green-dark);
-  border: 1px solid var(--green-light);
-  border-radius: 6px;
-  color: #fff;
-  padding: 6px 12px;
-  cursor: pointer;
-  font-size: 12px;
-}
-.animal-card button:disabled { opacity: 0.4; cursor: default; }
-
-/* ── Crafting ──────────────────────────────────────────────────── */
-.craft-slot {
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 8px;
-  padding: 10px;
-  margin-bottom: 8px;
-}
-.craft-slot.active { border-color: var(--gold); }
-
-/* ── Fishing mini-game ─────────────────────────────────────────── */
-#fishing-canvas {
-  display: block;
-  width: 100%;
-  max-width: 300px;
-  margin: 16px auto;
-  border-radius: 12px;
-  border: 2px solid rgba(100,200,255,0.4);
-}
-#fishing-result {
+.tutorial-step .tutorial-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+  width: 30px;
   text-align: center;
-  font-size: 1.2em;
-  font-weight: 700;
-  min-height: 2em;
-  color: #ffe066;
 }
+.tutorial-step em { color: #ffd24a; font-style: normal; }
+.tutorial-start {
+  display: block;
+  margin: 18px auto 6px;
+  padding: 14px 32px;
+  font-size: 16px;
+  font-weight: 700;
+  background: var(--green-mid);
+  border: 2px solid var(--green-light);
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tutorial-start:hover { background: var(--green-light); }

@@ -20,11 +20,13 @@ export class UI {
     this.$tool.textContent = toolMap[player.tool] || player.tool;
     this.$seed.textContent = player.tool === 'seed' ? `🌱 ${CROPS[player.selectedSeed]?.label || player.selectedSeed}` : '';
 
-    // Season + weather
+    // Season + weather + live day-progress bar (▱▰)
     const seasonEl = document.getElementById('hud-season');
     if (seasonEl) {
       const wDef = WEATHER_TYPES.find(w => w.id === game.weather) || WEATHER_TYPES[0];
-      seasonEl.textContent = `${SEASON_ICONS[game.season]} ${SEASONS[game.season]} ${wDef.icon} · Day ${game.seasonDay + 1}/${7}`;
+      const filled = Math.round(game.dayProgress() * 6);
+      const bar = '▰'.repeat(filled) + '▱'.repeat(6 - filled);
+      seasonEl.textContent = `${SEASON_ICONS[game.season]} ${SEASONS[game.season]} ${wDef.icon} · Day ${game.seasonDay + 1}/7 ${bar}`;
     }
 
     // Quest badge
@@ -34,11 +36,7 @@ export class UI {
       questBadge.textContent = count > 0 ? count : '';
       questBadge.style.display = count > 0 ? 'inline' : 'none';
     }
-
-    this._updateTabBar(game);
   }
-
-  _updateTabBar(game) {}
 
   notify(msg, duration = 2500) {
     this.$notification.textContent = msg;
@@ -422,58 +420,37 @@ export class UI {
     });
   }
 
-  // ─── Crafting ────────────────────────────────────────────────────────────────
+  // ─── First-Run Tutorial ──────────────────────────────────────────────────────
 
-  openCrafting(game, onStartCraft, onCollect, onUnlockSlot) {
-    const modal = document.getElementById('modal-crafting');
+  openTutorial(onClose) {
+    const modal = document.getElementById('modal-tutorial');
     modal.innerHTML = '';
     modal.classList.add('active');
-    modal.appendChild(this._makeClose(() => modal.classList.remove('active')));
 
-    const title = document.createElement('h2'); title.textContent = '🏺 Crafting'; modal.appendChild(title);
+    const title = document.createElement('h2');
+    title.textContent = '🌾 Welcome to Farm Sim!';
+    modal.appendChild(title);
 
-    // Active slots
-    const slotH = document.createElement('h3'); slotH.textContent = 'Crafting Slots'; modal.appendChild(slotH);
-
-    for (let i = 0; i < 2; i++) {
-      const row = document.createElement('div'); row.className = 'shop-row';
-      const slot = game.craftingSlots[i];
-      const locked = i >= game.craftingSlotsUnlocked;
-      if (locked) {
-        row.innerHTML = `<span>🔒 Slot ${i + 1} (locked)</span><span>${EXTRA_CRAFT_SLOT_COST} 🪙</span>`;
-        const btn = document.createElement('button'); btn.textContent = 'Unlock';
-        btn.onclick = () => { if (onUnlockSlot()) { this.notify('Crafting slot unlocked!'); this.openCrafting(game, onStartCraft, onCollect, onUnlockSlot); } else this.notify('Not enough coins!'); };
-        row.appendChild(btn);
-      } else if (!slot) {
-        row.innerHTML = `<span>Slot ${i + 1}: <em>Empty</em></span>`;
-      } else if (slot.done) {
-        const recipe = RECIPES[slot.recipeKey];
-        row.innerHTML = `<span>Slot ${i + 1}: ✅ ${recipe?.label} ready!</span>`;
-        const btn = document.createElement('button'); btn.textContent = 'Collect'; btn.style.background = '#2a8a20';
-        btn.onclick = () => { onCollect(i); this.notify(`Collected ${recipe?.label}!`); this.openCrafting(game, onStartCraft, onCollect, onUnlockSlot); };
-        row.appendChild(btn);
-      } else {
-        const recipe = RECIPES[slot.recipeKey];
-        row.innerHTML = `<span>Slot ${i + 1}: ⏳ ${recipe?.label} (${slot.daysLeft} day${slot.daysLeft !== 1 ? 's' : ''} left)</span>`;
-      }
+    const steps = [
+      ['⛏️', '<strong>Till</strong> — pick the Hoe (tool 1), tap grass to make soil.'],
+      ['🌱', '<strong>Plant</strong> — pick Seeds (tool 3), tap tilled soil. Buy more seeds in the Market.'],
+      ['💧', '<strong>Water</strong> — pick the Watering Can (tool 2). Crops need water every ~2 min or they <em>dry out and pause</em>. Re-water to resume. Upgrade to Auto-Drip to water everything forever.'],
+      ['✂️', '<strong>Harvest</strong> — when a tile shows <em>✂Ready</em>, pick the Scythe (tool 4) and tap it.'],
+      ['🪙', '<strong>Sell</strong> — open the Market to sell crops for coins, then expand your farm.'],
+      ['⏱️', '<strong>Time flows</strong> — days, seasons, animals & crafting advance automatically. Rain waters crops for free. Tap <em>⏭️ Skip Day</em> to fast-forward.'],
+    ];
+    steps.forEach(([icon, text]) => {
+      const row = document.createElement('div');
+      row.className = 'tutorial-step';
+      row.innerHTML = `<span class="tutorial-icon">${icon}</span><span>${text}</span>`;
       modal.appendChild(row);
-    }
-
-    // Recipes
-    const recH = document.createElement('h3'); recH.textContent = 'Recipes'; modal.appendChild(recH);
-
-    Object.entries(RECIPES).forEach(([key, recipe]) => {
-      const have = game.harvestInventory[recipe.input] || 0;
-      const canCraft = have >= recipe.qty;
-      const row = document.createElement('div'); row.className = 'shop-row';
-      row.innerHTML = `<span><strong>${recipe.label}</strong><br><small>${recipe.qty}× ${CROPS[recipe.input]?.label || recipe.input} → ${recipe.sellPrice} 🪙 (${recipe.days} day${recipe.days !== 1 ? 's' : ''})</small></span><span>Have: ${have}</span>`;
-      const freeSlot = game.craftingSlots.findIndex((s, i) => s === null && i < game.craftingSlotsUnlocked);
-      const btn = document.createElement('button');
-      btn.textContent = 'Craft';
-      btn.disabled = !canCraft || freeSlot === -1;
-      btn.onclick = () => { if (onStartCraft(freeSlot, key)) { this.notify(`Crafting ${recipe.label}…`); this.openCrafting(game, onStartCraft, onCollect, onUnlockSlot); } };
-      row.appendChild(btn); modal.appendChild(row);
     });
+
+    const btn = document.createElement('button');
+    btn.textContent = "Let's farm! 🚜";
+    btn.className = 'tutorial-start';
+    btn.onclick = () => { modal.classList.remove('active'); onClose(); };
+    modal.appendChild(btn);
   }
 
   // ─── Fishing Mini-Game ────────────────────────────────────────────────────────

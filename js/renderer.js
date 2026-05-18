@@ -59,21 +59,27 @@ export class Renderer {
     // Fence
     this._drawFence(ctx, farm);
 
+    // Only iterate tiles within the viewport (perf for large farms)
+    const x0 = Math.max(0, Math.floor(farm.camX / TILE_SIZE));
+    const y0 = Math.max(0, Math.floor(farm.camY / TILE_SIZE));
+    const x1 = Math.min(farm.cols, Math.ceil((farm.camX + this.w) / TILE_SIZE));
+    const y1 = Math.min(farm.rows, Math.ceil((farm.camY + this.h) / TILE_SIZE));
+
     // Tiles
-    for (let y = 0; y < farm.rows; y++) {
-      for (let x = 0; x < farm.cols; x++) {
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
         this._drawTile(ctx, x, y, farm.tiles[y][x]);
       }
     }
 
-    // Subtle tile grid
+    // Subtle tile grid (visible range only)
     ctx.strokeStyle = 'rgba(0,0,0,0.07)';
     ctx.lineWidth = 1;
-    for (let y = 0; y <= farm.rows; y++) {
-      ctx.beginPath(); ctx.moveTo(0, y * TILE_SIZE); ctx.lineTo(farm.cols * TILE_SIZE, y * TILE_SIZE); ctx.stroke();
+    for (let y = y0; y <= y1; y++) {
+      ctx.beginPath(); ctx.moveTo(x0 * TILE_SIZE, y * TILE_SIZE); ctx.lineTo(x1 * TILE_SIZE, y * TILE_SIZE); ctx.stroke();
     }
-    for (let x = 0; x <= farm.cols; x++) {
-      ctx.beginPath(); ctx.moveTo(x * TILE_SIZE, 0); ctx.lineTo(x * TILE_SIZE, farm.rows * TILE_SIZE); ctx.stroke();
+    for (let x = x0; x <= x1; x++) {
+      ctx.beginPath(); ctx.moveTo(x * TILE_SIZE, y0 * TILE_SIZE); ctx.lineTo(x * TILE_SIZE, y1 * TILE_SIZE); ctx.stroke();
     }
 
     // Action tile highlight (dashed)
@@ -283,42 +289,41 @@ export class Renderer {
     const def = CROPS[crop.kind];
     if (!def) return;
 
-    ctx.save();
-    ctx.font = 'bold 8px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    const stripY = py + TILE_SIZE - 14;
-    const stripH = 14;
+    const stripH = 17;
+    const stripY = py + TILE_SIZE - stripH;
     const cx = px + TILE_SIZE / 2;
-    const cy = stripY + stripH / 2;
+    const cy = stripY + stripH / 2 + 1;
 
     let bgColor, label;
 
     if (crop.stage >= 3) {
-      bgColor = 'rgba(50,200,50,0.85)';
-      label = '✂ Ready';
+      bgColor = 'rgba(40,180,50,0.92)';
+      label = '✂Ready';
     } else if (crop.isDry) {
-      bgColor = 'rgba(200,60,30,0.88)';
-      label = '⚠ Water!';
+      bgColor = 'rgba(210,55,30,0.95)';
+      label = '⚠Water';
     } else {
       const now = Date.now();
       const msUntilDry = def.waterIntervalMs - (now - crop.lastWateredAt);
       if (msUntilDry < 30000) {
-        bgColor = 'rgba(200,150,0,0.85)';
-        label = '💧 ' + this._formatMs(msUntilDry);
+        bgColor = 'rgba(210,150,0,0.92)';
+        label = '💧' + this._formatMs(msUntilDry);
       } else {
-        bgColor = 'rgba(20,20,20,0.6)';
-        const msLeft = def.growMs - crop.totalGrownMs;
-        label = '⏱ ' + this._formatMs(msLeft);
+        bgColor = 'rgba(15,15,15,0.7)';
+        label = '⏱' + this._formatMs(def.growMs - crop.totalGrownMs);
       }
     }
 
+    ctx.save();
     ctx.fillStyle = bgColor;
     ctx.fillRect(px, stripY, TILE_SIZE, stripH);
+    ctx.font = 'bold 11px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000';
+    ctx.fillText(label, cx + 0.5, cy + 0.5);
     ctx.fillStyle = '#fff';
     ctx.fillText(label, cx, cy);
-
     ctx.restore();
   }
 

@@ -92,8 +92,9 @@ export class Farm {
     return harvested;
   }
 
-  // Called every frame — advances real-time crop growth
-  tick(dt) {
+  // Called every frame — advances real-time crop growth.
+  // autoWater = true (Auto-Drip tool) keeps every crop perpetually watered.
+  tick(dt, autoWater = false) {
     const now = Date.now();
     for (let y = 0; y < this.rows; y++) {
       for (let x = 0; x < this.cols; x++) {
@@ -102,11 +103,14 @@ export class Farm {
         const def = CROPS[crop.kind];
         if (!def) continue;
 
-        if (!crop.isDry && (now - crop.lastWateredAt) > def.waterIntervalMs) {
+        if (autoWater) {
+          crop.lastWateredAt = now;
+          crop.isDry = false;
+        } else if (!crop.isDry && (now - crop.lastWateredAt) > def.waterIntervalMs) {
           crop.isDry = true;
         }
         if (!crop.isDry) {
-          crop.totalGrownMs += dt;
+          crop.totalGrownMs = Math.min(def.growMs, crop.totalGrownMs + dt);
         }
         const p = crop.totalGrownMs / def.growMs;
         crop.stage = p >= 1 ? 3 : Math.floor(p * 3);

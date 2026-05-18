@@ -28,6 +28,14 @@ function init() {
   setupSleepBtn();
   setupMobileControls();
 
+  // First-run tutorial
+  if (!game.tutorialSeen) {
+    ui.openTutorial(() => {
+      game.tutorialSeen = true;
+      game.autoSave();
+    });
+  }
+
   // Daily login gem reward (doesn't advance the farm or day counter)
   const today = new Date().toDateString();
   if (game.lastLoginDate !== today) {
@@ -120,9 +128,11 @@ function handleCanvasClick(screenX, screenY) {
 function useTool(tx, ty) {
   const { player, farm } = game;
 
+  // Face the tapped tile (don't teleport the player across the farm)
   if (tx >= 0 && ty >= 0 && tx < farm.cols && ty < farm.rows) {
-    player.gridX = Math.max(0, Math.min(farm.cols - 1, tx));
-    player.gridY = Math.max(0, Math.min(farm.rows - 1, ty));
+    const ddx = tx - player.gridX, ddy = ty - player.gridY;
+    if (Math.abs(ddx) > Math.abs(ddy)) { player.facingDX = Math.sign(ddx); player.facingDY = 0; }
+    else if (ddy !== 0) { player.facingDX = 0; player.facingDY = Math.sign(ddy); }
   }
 
   if (player.tool === 'hoe') {
@@ -163,7 +173,7 @@ function doSleep() {
   game.sleepToNextDay();
   const weatherIcons = { sunny: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️' };
   const icon = weatherIcons[game.weather] || '🌅';
-  ui.notify(`Day ${game.day} — Good morning! ${icon}`);
+  ui.notify(`⏭️ Day ${game.day} · ${icon} ${game.weather}`);
 }
 
 function openFishingGame() {

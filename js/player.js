@@ -42,7 +42,7 @@ export class Player {
   }
 
   serialize() {
-    return { gridX: this.gridX, gridY: this.gridY, tool: this.tool, selectedSeed: this.selectedSeed, skin: this.skin };
+    return { gridX: this.gridX, gridY: this.gridY, tool: this.tool, selectedSeed: this.selectedSeed, skin: this.skin, facingDX: this.facingDX, facingDY: this.facingDY };
   }
 
   static deserialize(data) {

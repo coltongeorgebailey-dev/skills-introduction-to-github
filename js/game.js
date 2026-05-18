@@ -5,6 +5,7 @@ import {
   RECIPES, EXTRA_CRAFT_SLOT_COST,
   FISH,
   QUESTS,
+  DAY_MS, OFFLINE_DAY_CAP,
 } from './constants.js';
 import { Farm } from './farm.js';
 import { Player } from './player.js';
@@ -60,10 +61,18 @@ export class Game {
 
     this.lastLoginDate = null;
 
+    // Real-time day clock
+    this._dayAccumulatorMs = 0;
+    this._questAccumulatorMs = 0;
+    this.tutorialSeen = false;
+
     const size = FARM_SIZES[0];
     this.farm = new Farm(size.cols, size.rows);
     this.player = new Player();
   }
+
+  // Auto-Drip (tier 3 watering can) keeps every crop watered with no manual taps
+  _autoWaterActive() { return (this.machineryTiers.wateringCan || 1) >= 3; }
 
   // ── Machinery helpers ─────────────────────────────────────────────────────
 
@@ -117,11 +126,33 @@ export class Game {
 
   // ── Day advancement ───────────────────────────────────────────────────────
 
-  // Delegates real-time crop growth to farm — called every frame from main loop
-  tick(dt) { this.farm.tick(dt); }
+  // Master clock — called every frame from the main loop.
+  // Crops grow continuously; a game day passes every DAY_MS of real time,
+  // which drives seasons, weather, animals, crafting and quests.
+  tick(dt) {
+    this.farm.tick(dt, this._autoWaterActive());
 
-  sleepToNextDay() {
-    // Roll weather for the new day
+    this._dayAccumulatorMs += dt;
+    let guard = 0;
+    while (this._dayAccumulatorMs >= DAY_MS && guard < 100) {
+      this._dayAccumulatorMs -= DAY_MS;
+      this._advanceGameDay();
+      guard++;
+    }
+
+    // Quest progress re-checked ~1×/sec so real-time goals complete live
+    this._questAccumulatorMs += dt;
+    if (this._questAccumulatorMs >= 1000) {
+      this._questAccumulatorMs = 0;
+      this.checkQuests();
+    }
+  }
+
+  // Progress within the current game day, 0..1 (for HUD display)
+  dayProgress() { return Math.min(1, this._dayAccumulatorMs / DAY_MS); }
+
+  // One game day elapses — weather, season, animals, crafting, quests
+  _advanceGameDay() {
     this.weather = this._rollWeather();
     const weatherDef = this.currentWeatherDef();
 
@@ -140,6 +171,12 @@ export class Game {
     this._checkDailyLogin();
     this.checkQuests();
     this.autoSave();
+  }
+
+  // Manual "skip ahead" button — fast-forwards to the next day immediately
+  sleepToNextDay() {
+    this._dayAccumulatorMs = 0;
+    this._advanceGameDay();
   }
 
   _checkDailyLogin() {
@@ -436,6 +473,7 @@ export class Game {
       fishInventory: this.fishInventory,
       completedQuests: this.completedQuests, claimedQuests: this.claimedQuests,
       milestones: this.milestones, lastLoginDate: this.lastLoginDate,
+      dayAccumulatorMs: this._dayAccumulatorMs, tutorialSeen: this.tutorialSeen,
       farm: this.farm.serialize(),
       player: this.player.serialize(),
     };
@@ -455,33 +493,49 @@ export class Game {
     g.completedQuests = d.completedQuests || []; g.claimedQuests = d.claimedQuests || [];
     g.milestones = { totalHarvested: 0, daysPlayed: 0, rainyDays: 0, eggsCollected: 0, fishCaught: 0, crafted: 0, seasonsCompleted: 0, legendaryFish: 0, cropsGrownByKind: {}, ...(d.milestones || {}) };
     g.lastLoginDate = d.lastLoginDate || null;
+    g._dayAccumulatorMs = d.dayAccumulatorMs || 0;
+    g.tutorialSeen = d.tutorialSeen || false;
     g.farm = Farm.deserialize(d.farm);
     g.player = Player.deserialize(d.player);
 
-    // Offline crop advancement — advance growth for time spent away (cap 30 min)
+    // ── Offline catch-up ──────────────────────────────────────────────────
     const now = Date.now();
     const savedAt = d.savedAt || now;
-    const offlineMs = Math.min(now - savedAt, 30 * 60 * 1000);
+    const offlineMs = Math.min(Math.max(0, now - savedAt), OFFLINE_DAY_CAP * DAY_MS);
+
     if (offlineMs > 0) {
+      const autoWater = g._autoWaterActive();
+
+      // Crops kept growing while away — until they dried (unless Auto-Drip)
       for (let y = 0; y < g.farm.rows; y++) {
         for (let x = 0; x < g.farm.cols; x++) {
           const crop = g.farm.tiles[y][x].crop;
           if (!crop || crop.stage >= 3) continue;
           const def = CROPS[crop.kind];
           if (!def) continue;
-          const timeSinceWater = now - crop.lastWateredAt;
-          if (timeSinceWater > def.waterIntervalMs) {
-            crop.isDry = true;
-            // Only count growth up to when it dried
-            const grewBeforeDry = Math.max(0, def.waterIntervalMs - Math.max(0, savedAt - crop.lastWateredAt));
-            crop.totalGrownMs = Math.min(def.growMs, crop.totalGrownMs + grewBeforeDry);
-          } else if (!crop.isDry) {
-            crop.totalGrownMs = Math.min(def.growMs, crop.totalGrownMs + offlineMs);
-          }
+
+          // Absolute time the crop stops growing without water
+          const dryAt = autoWater ? Infinity : crop.lastWateredAt + def.waterIntervalMs;
+          // It only accrues growth during the offline window [savedAt, now]
+          const growEnd = Math.min(now, dryAt);
+          const offlineGrow = Math.max(0, growEnd - savedAt);
+          crop.totalGrownMs = Math.min(def.growMs, crop.totalGrownMs + offlineGrow);
+          if (!autoWater && now >= dryAt) crop.isDry = true;
+
           const p = crop.totalGrownMs / def.growMs;
           crop.stage = p >= 1 ? 3 : Math.floor(p * 3);
         }
       }
+
+      // Game days also passed while away (seasons/animals/crafting/quests)
+      g._dayAccumulatorMs += offlineMs;
+      let days = 0;
+      while (g._dayAccumulatorMs >= DAY_MS && days < OFFLINE_DAY_CAP) {
+        g._dayAccumulatorMs -= DAY_MS;
+        g._advanceGameDay();
+        days++;
+      }
+      if (g._dayAccumulatorMs > DAY_MS) g._dayAccumulatorMs = 0; // discard overflow past the cap
     }
 
     return g;
