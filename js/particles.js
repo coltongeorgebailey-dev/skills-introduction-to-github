@@ -1,0 +1,111 @@
+const _pool = [];
+
+const PRESETS = {
+  harvest: (x, y) => Array.from({ length: 10 }, () => ({
+    x, y,
+    vx: (Math.random() - 0.5) * 130,
+    vy: -Math.random() * 110 - 40,
+    gravity: 200,
+    life: 650, maxLife: 650,
+    size: 4 + Math.random() * 4,
+    color: ['#f5c842', '#66cc44', '#ffee66', '#88dd44'][Math.random() * 4 | 0],
+    shape: 'rect',
+  })),
+
+  water: (x, y) => Array.from({ length: 7 }, () => ({
+    x, y,
+    vx: (Math.random() - 0.5) * 90,
+    vy: -Math.random() * 95 - 35,
+    gravity: 220,
+    life: 520, maxLife: 520,
+    size: 3 + Math.random() * 3,
+    color: 'rgba(80,160,255,0.85)',
+    shape: 'circle',
+  })),
+
+  plant: (x, y) => Array.from({ length: 5 }, () => ({
+    x, y,
+    vx: (Math.random() - 0.5) * 70,
+    vy: -Math.random() * 65 - 20,
+    gravity: 260,
+    life: 420, maxLife: 420,
+    size: 3 + Math.random() * 2,
+    color: 'rgba(120,80,40,0.82)',
+    shape: 'rect',
+  })),
+
+  coin: (x, y) => Array.from({ length: 6 }, (_, i) => ({
+    x: x + (Math.random() - 0.5) * 30,
+    y,
+    vx: (Math.random() - 0.5) * 55,
+    vy: -Math.random() * 70 - 40,
+    gravity: 0,
+    life: 750, maxLife: 750,
+    size: 5,
+    color: 'rgba(245,200,40,0.92)',
+    shape: 'circle',
+  })),
+
+  levelUp: (x, y) => Array.from({ length: 14 }, (_, i) => {
+    const angle = (i / 14) * Math.PI * 2;
+    const speed = 100 + Math.random() * 70;
+    return {
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      gravity: 0,
+      life: 750, maxLife: 750,
+      size: 5 + Math.random() * 3,
+      color: 'rgba(255,220,40,0.92)',
+      shape: 'star',
+    };
+  }),
+};
+
+export function emit(x, y, preset) {
+  const maker = PRESETS[preset];
+  if (maker) _pool.push(...maker(x, y));
+}
+
+export function tick(dt) {
+  const sec = dt / 1000;
+  for (let i = _pool.length - 1; i >= 0; i--) {
+    const p = _pool[i];
+    p.x += p.vx * sec;
+    p.y += p.vy * sec;
+    p.vy += p.gravity * sec;
+    p.life -= dt;
+    if (p.life <= 0) _pool.splice(i, 1);
+  }
+}
+
+export function draw(ctx) {
+  for (const p of _pool) {
+    const alpha = Math.max(0, p.life / p.maxLife);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (p.shape === 'circle') {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (p.shape === 'star') {
+      ctx.fillStyle = p.color;
+      ctx.translate(p.x, p.y);
+      ctx.rotate((1 - alpha) * Math.PI * 3);
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+        const ia = a + Math.PI / 5;
+        ctx.lineTo(Math.cos(a) * p.size, Math.sin(a) * p.size);
+        ctx.lineTo(Math.cos(ia) * p.size * 0.4, Math.sin(ia) * p.size * 0.4);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.restore();
+  }
+}

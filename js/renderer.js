@@ -25,12 +25,33 @@ export class Renderer {
   get w() { return this.canvas.width; }
   get h() { return this.canvas.height; }
 
-  render(game, view, timestamp = 0) {
+  shake(intensity, duration) {
+    this._shakeIntensity = intensity;
+    this._shakeEnd = Date.now() + duration;
+  }
+
+  render(game, view, timestamp = 0, particles = null) {
     this._timestamp = timestamp;
-    this.ctx.clearRect(0, 0, this.w, this.h);
+    const { ctx } = this;
+    ctx.clearRect(0, 0, this.w, this.h);
+
+    // Screen shake
+    let shakeX = 0, shakeY = 0;
+    if (this._shakeEnd && Date.now() < this._shakeEnd) {
+      shakeX = (Math.random() - 0.5) * this._shakeIntensity;
+      shakeY = (Math.random() - 0.5) * this._shakeIntensity;
+    }
+    ctx.save();
+    if (shakeX || shakeY) ctx.translate(shakeX, shakeY);
+
     if (view === 'farm') this._renderFarm(game);
     else if (view === 'home') this._renderHome(game);
     else if (view === 'barn') this._renderBarn(game);
+
+    ctx.restore();
+
+    // Particles drawn in screen space after everything else
+    if (particles) particles.draw(ctx);
   }
 
   // ── Farm ────────────────────────────────────────────────────────────────────

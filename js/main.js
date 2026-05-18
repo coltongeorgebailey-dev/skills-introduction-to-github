@@ -5,6 +5,8 @@ import { Input } from './input.js';
 import { loadGame } from './save.js';
 import { checkStripeReturn } from './iap.js';
 import { CROPS, TILE_SIZE } from './constants.js';
+import * as audio from './audio.js';
+import * as particles from './particles.js';
 
 let game, renderer, ui, input;
 let currentView = 'farm';
@@ -26,6 +28,7 @@ function init() {
   setupTabBar();
   setupToolBar();
   setupSleepBtn();
+  setupMuteBtn();
   setupMobileControls();
 
   // First-run tutorial
@@ -55,8 +58,9 @@ function loop(timestamp) {
   input.update();
   processInput(dt);
   game.tick(dt);
+  particles.tick(dt);
 
-  renderer.render(game, currentView, timestamp);
+  renderer.render(game, currentView, timestamp, particles);
   ui.updateHUD(game);
 
   saveInterval += dt;
@@ -125,6 +129,13 @@ function handleCanvasClick(screenX, screenY) {
   useTool(tileX, tileY);
 }
 
+function _tileScreenCenter(tx, ty) {
+  return {
+    px: tx * TILE_SIZE - game.farm.camX + TILE_SIZE / 2,
+    py: ty * TILE_SIZE - game.farm.camY + TILE_SIZE / 2,
+  };
+}
+
 function useTool(tx, ty) {
   const { player, farm } = game;
 
@@ -135,12 +146,17 @@ function useTool(tx, ty) {
     else if (ddy !== 0) { player.facingDX = 0; player.facingDY = Math.sign(ddy); }
   }
 
+  const { px, py } = _tileScreenCenter(tx, ty);
+
   if (player.tool === 'hoe') {
     const aoe = game.getToolAoe('hoe');
-    farm.till(tx, ty, aoe);
+    const count = farm.till(tx, ty, aoe);
+    if (count > 0) { audio.playTill(); particles.emit(px, py, 'plant'); }
   } else if (player.tool === 'water') {
     const aoe = game.getToolAoe('wateringCan');
     farm.water(tx, ty, aoe);
+    audio.playWater();
+    particles.emit(px, py, 'water');
   } else if (player.tool === 'seed') {
     const kind = player.selectedSeed;
     if (!game.canPlantCrop(kind)) {
@@ -150,6 +166,8 @@ function useTool(tx, ty) {
     if ((game.seedInventory[kind] || 0) > 0) {
       if (farm.plant(tx, ty, kind)) {
         game.seedInventory[kind]--;
+        audio.playPlant();
+        particles.emit(px, py, 'plant');
       } else {
         ui.notify('Tile must be tilled first!');
       }
@@ -163,6 +181,9 @@ function useTool(tx, ty) {
     if (total > 0) {
       const names = Object.entries(harvested).map(([k, v]) => `${v} ${CROPS[k]?.label}`).join(', ');
       ui.notify(`Harvested: ${names}!`);
+      audio.playHarvest();
+      particles.emit(px, py, 'harvest');
+      renderer.shake(3, 150);
     }
   }
 
@@ -179,14 +200,27 @@ function doSleep() {
 function openFishingGame() {
   ui.openFishingGame(game, (kind, def) => {
     game.catchFish(kind);
-    if (def) ui.notify(`🐟 ${def.label} added to inventory!`);
+    if (def) {
+      ui.notify(`🐟 ${def.label} added to inventory!`);
+      if (kind === 'legendary') {
+        audio.playQuestComplete();
+        particles.emit(renderer.w / 2, renderer.h / 2, 'levelUp');
+        renderer.shake(8, 400);
+      } else {
+        audio.playCoin();
+      }
+    }
   });
 }
 
 function openShopModal() {
   ui.openShop(game,
     (kind, n) => game.buySeed(kind, n),
-    (kind, n) => game.sellCrop(kind, n)
+    (kind, n) => {
+      const ok = game.sellCrop(kind, n);
+      if (ok) { audio.playCoin(); particles.emit(renderer.w / 2, renderer.h / 2, 'coin'); }
+      return ok;
+    }
   );
 }
 
@@ -233,13 +267,19 @@ function setupTabBar() {
         ui.closeAllModals();
       } else if (view === 'barn') {
         currentView = 'barn';
-        const feedAnimalFn = (id) => game.feedAnimal(id);
+        const feedAnimalFn = (id) => { if (game.feedAnimal(id)) audio.playFeed(); };
         const refreshBarn = () => ui.openBarnActions(game, feedAnimalFn, refreshBarn);
         ui.openBarnActions(game, feedAnimalFn, refreshBarn);
       } else if (view === 'quests') {
         currentView = 'farm';
         tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
-        const claimFn = (id) => { game.claimQuest(id); };
+        const claimFn = (id) => {
+          if (game.claimQuest(id)) {
+            audio.playQuestComplete();
+            particles.emit(renderer.w / 2, renderer.h / 2, 'levelUp');
+            renderer.shake(5, 200);
+          }
+        };
         ui.openQuestLog(game, claimFn);
       } else if (view === 'shop') {
         currentView = 'farm';
@@ -307,6 +347,15 @@ function setupSleepBtn() {
   document.getElementById('btn-furniture').addEventListener('click', () => {
     if (currentView !== 'home') { currentView = 'home'; }
     ui.openFurniturePicker(game, def => { pendingFurniture = def; });
+  });
+}
+
+function setupMuteBtn() {
+  const btn = document.getElementById('btn-mute');
+  if (!btn) return;
+  btn.textContent = audio.isMuted() ? '🔇' : '🔊';
+  btn.addEventListener('click', () => {
+    btn.textContent = audio.toggleMute() ? '🔇' : '🔊';
   });
 }
 
