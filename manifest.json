@@ -1,7 +1,7 @@
 {
-  "name": "Farm Simulator",
-  "short_name": "FarmSim",
-  "description": "A 2D farm simulator — plant, grow, harvest, and build your farm empire.",
+  "name": "Harvest Haven",
+  "short_name": "Harvest Haven",
+  "description": "Harvest Haven — plant, grow, harvest, and build your farm empire.",
   "start_url": "./index.html",
   "display": "standalone",
   "orientation": "landscape",
