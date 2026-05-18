@@ -5,7 +5,6 @@ export class Farm {
     this.cols = cols;
     this.rows = rows;
     this.tiles = this._initTiles(cols, rows);
-    // Camera offset in pixels (for panning)
     this.camX = 0;
     this.camY = 0;
   }
@@ -33,7 +32,6 @@ export class Farm {
     return this.tiles[y][x];
   }
 
-  // Returns array of {x, y} tiles affected by the action (AoE centered on cx, cy)
   _aoeTiles(cx, cy, aoe) {
     const tiles = [];
     if (aoe <= 1) { tiles.push({ x: cx, y: cy }); return tiles; }
@@ -63,7 +61,10 @@ export class Farm {
     const targets = this._aoeTiles(x, y, aoe);
     targets.forEach(({ x: tx, y: ty }) => {
       const tile = this.getTile(tx, ty);
-      if (tile && tile.crop) tile.crop.wateredToday = true;
+      if (tile && tile.crop) {
+        tile.crop.lastWateredAt = Date.now();
+        tile.crop.isDry = false;
+      }
     });
     return targets.length;
   }
@@ -72,11 +73,10 @@ export class Farm {
     const tile = this.getTile(x, y);
     if (!tile || tile.type !== 'tilled' || tile.crop) return false;
     tile.type = 'planted';
-    tile.crop = { kind, stage: 0, daysWatered: 0, wateredToday: false };
+    tile.crop = { kind, stage: 0, totalGrownMs: 0, lastWateredAt: Date.now(), isDry: false };
     return true;
   }
 
-  // Returns crop kind if successful harvest, null otherwise
   harvest(x, y, aoe = 1) {
     const targets = this._aoeTiles(x, y, aoe);
     const harvested = {};
@@ -92,21 +92,38 @@ export class Farm {
     return harvested;
   }
 
-  advanceDay() {
+  // Called every frame — advances real-time crop growth
+  tick(dt) {
+    const now = Date.now();
     for (let y = 0; y < this.rows; y++) {
       for (let x = 0; x < this.cols; x++) {
-        const tile = this.tiles[y][x];
-        if (!tile.crop) continue;
-        const crop = tile.crop;
-        if (crop.wateredToday) {
-          crop.daysWatered++;
-          const def = CROPS[crop.kind];
-          if (def) {
-            const progress = crop.daysWatered / def.daysToGrow;
-            crop.stage = Math.min(3, Math.floor(progress * 3) + (progress >= 1 ? 1 : 0));
-          }
+        const crop = this.tiles[y][x].crop;
+        if (!crop || crop.stage >= 3) continue;
+        const def = CROPS[crop.kind];
+        if (!def) continue;
+
+        if (!crop.isDry && (now - crop.lastWateredAt) > def.waterIntervalMs) {
+          crop.isDry = true;
         }
-        crop.wateredToday = false;
+        if (!crop.isDry) {
+          crop.totalGrownMs += dt;
+        }
+        const p = crop.totalGrownMs / def.growMs;
+        crop.stage = p >= 1 ? 3 : Math.floor(p * 3);
+      }
+    }
+  }
+
+  // Called on Sleep — applies rain/storm auto-watering only
+  applyWeatherWater() {
+    const now = Date.now();
+    for (let y = 0; y < this.rows; y++) {
+      for (let x = 0; x < this.cols; x++) {
+        const crop = this.tiles[y][x].crop;
+        if (crop) {
+          crop.lastWateredAt = now;
+          crop.isDry = false;
+        }
       }
     }
   }
@@ -125,7 +142,27 @@ export class Farm {
     const farm = new Farm(data.cols, data.rows);
     farm.camX = data.camX || 0;
     farm.camY = data.camY || 0;
-    farm.tiles = data.tiles.map(row => row.map(t => ({ ...t, crop: t.crop ? { ...t.crop } : null })));
+    farm.tiles = data.tiles.map(row => row.map(t => {
+      const tile = { ...t, crop: t.crop ? { ...t.crop } : null };
+      if (tile.crop) {
+        const crop = tile.crop;
+        const def = CROPS[crop.kind];
+        // Migrate old save format (daysWatered/wateredToday → totalGrownMs/lastWateredAt)
+        if (crop.daysWatered !== undefined && crop.totalGrownMs === undefined) {
+          const progress = def ? crop.daysWatered / (def.daysToGrow || 1) : 0;
+          crop.totalGrownMs = def ? progress * def.growMs : 0;
+          crop.lastWateredAt = Date.now();
+          crop.isDry = !crop.wateredToday;
+          delete crop.daysWatered;
+          delete crop.wateredToday;
+        }
+        // Ensure new fields exist (defensive)
+        if (crop.lastWateredAt == null) crop.lastWateredAt = Date.now();
+        if (crop.isDry == null) crop.isDry = false;
+        if (crop.totalGrownMs == null) crop.totalGrownMs = 0;
+      }
+      return tile;
+    }));
     return farm;
   }
 }

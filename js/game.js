@@ -117,23 +117,20 @@ export class Game {
 
   // ── Day advancement ───────────────────────────────────────────────────────
 
+  // Delegates real-time crop growth to farm — called every frame from main loop
+  tick(dt) { this.farm.tick(dt); }
+
   sleepToNextDay() {
     // Roll weather for the new day
     this.weather = this._rollWeather();
     const weatherDef = this.currentWeatherDef();
 
-    // Rain auto-waters all crops
+    // Rain/storm auto-waters all crops (resets dry timers)
     if (weatherDef.autoWater) {
-      for (let y = 0; y < this.farm.rows; y++) {
-        for (let x = 0; x < this.farm.cols; x++) {
-          const tile = this.farm.tiles[y][x];
-          if (tile.crop) tile.crop.wateredToday = true;
-        }
-      }
+      this.farm.applyWeatherWater();
       this.milestones.rainyDays++;
     }
 
-    this.farm.advanceDay();
     this._advanceSeason();
     this.day++;
     this.milestones.daysPlayed++;
@@ -428,6 +425,7 @@ export class Game {
 
   serialize() {
     return {
+      savedAt: Date.now(),
       day: this.day, coins: this.coins, gems: this.gems, totalCoinsEarned: this.totalCoinsEarned,
       farmSizeId: this.farmSizeId, machineryTiers: this.machineryTiers,
       ownedSkins: this.ownedSkins, homeLayout: this.homeLayout, houseSkin: this.houseSkin,
@@ -459,6 +457,33 @@ export class Game {
     g.lastLoginDate = d.lastLoginDate || null;
     g.farm = Farm.deserialize(d.farm);
     g.player = Player.deserialize(d.player);
+
+    // Offline crop advancement — advance growth for time spent away (cap 30 min)
+    const now = Date.now();
+    const savedAt = d.savedAt || now;
+    const offlineMs = Math.min(now - savedAt, 30 * 60 * 1000);
+    if (offlineMs > 0) {
+      for (let y = 0; y < g.farm.rows; y++) {
+        for (let x = 0; x < g.farm.cols; x++) {
+          const crop = g.farm.tiles[y][x].crop;
+          if (!crop || crop.stage >= 3) continue;
+          const def = CROPS[crop.kind];
+          if (!def) continue;
+          const timeSinceWater = now - crop.lastWateredAt;
+          if (timeSinceWater > def.waterIntervalMs) {
+            crop.isDry = true;
+            // Only count growth up to when it dried
+            const grewBeforeDry = Math.max(0, def.waterIntervalMs - Math.max(0, savedAt - crop.lastWateredAt));
+            crop.totalGrownMs = Math.min(def.growMs, crop.totalGrownMs + grewBeforeDry);
+          } else if (!crop.isDry) {
+            crop.totalGrownMs = Math.min(def.growMs, crop.totalGrownMs + offlineMs);
+          }
+          const p = crop.totalGrownMs / def.growMs;
+          crop.stage = p >= 1 ? 3 : Math.floor(p * 3);
+        }
+      }
+    }
+
     return g;
   }
 }

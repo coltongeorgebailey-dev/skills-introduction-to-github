@@ -266,9 +266,60 @@ export class Renderer {
     if (tile.type === 'grass') {
       this._drawGrassTile(ctx, px, py, x, y);
     } else {
-      this._drawDirtTile(ctx, px, py, x, y, tile.crop?.wateredToday || false);
-      if (tile.crop) this._drawCrop(ctx, px, py, tile.crop);
+      this._drawDirtTile(ctx, px, py, x, y, tile.crop != null && !tile.crop.isDry);
+      if (tile.crop) {
+        this._drawCrop(ctx, px, py, tile.crop);
+        this._drawCropTimerOverlay(ctx, px, py, tile.crop);
+      }
     }
+  }
+
+  _formatMs(ms) {
+    const s = Math.max(0, Math.ceil(ms / 1000));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  _drawCropTimerOverlay(ctx, px, py, crop) {
+    const def = CROPS[crop.kind];
+    if (!def) return;
+
+    ctx.save();
+    ctx.font = 'bold 8px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const stripY = py + TILE_SIZE - 14;
+    const stripH = 14;
+    const cx = px + TILE_SIZE / 2;
+    const cy = stripY + stripH / 2;
+
+    let bgColor, label;
+
+    if (crop.stage >= 3) {
+      bgColor = 'rgba(50,200,50,0.85)';
+      label = '✂ Ready';
+    } else if (crop.isDry) {
+      bgColor = 'rgba(200,60,30,0.88)';
+      label = '⚠ Water!';
+    } else {
+      const now = Date.now();
+      const msUntilDry = def.waterIntervalMs - (now - crop.lastWateredAt);
+      if (msUntilDry < 30000) {
+        bgColor = 'rgba(200,150,0,0.85)';
+        label = '💧 ' + this._formatMs(msUntilDry);
+      } else {
+        bgColor = 'rgba(20,20,20,0.6)';
+        const msLeft = def.growMs - crop.totalGrownMs;
+        label = '⏱ ' + this._formatMs(msLeft);
+      }
+    }
+
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(px, stripY, TILE_SIZE, stripH);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, cx, cy);
+
+    ctx.restore();
   }
 
   _drawGrassTile(ctx, px, py, tx, ty) {

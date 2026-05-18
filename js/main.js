@@ -41,11 +41,12 @@ function init() {
 }
 
 function loop(timestamp) {
-  const dt = timestamp - lastTime;
+  const dt = lastTime === 0 ? 0 : Math.min(timestamp - lastTime, 1000);
   lastTime = timestamp;
 
   input.update();
   processInput(dt);
+  game.tick(dt);
 
   renderer.render(game, currentView, timestamp);
   ui.updateHUD(game);
