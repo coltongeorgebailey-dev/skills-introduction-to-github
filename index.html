@@ -20,6 +20,7 @@
       <span id="hud-day">Day 1</span>
       <span id="hud-coins">🪙 100</span>
       <span id="hud-gems">💎 10</span>
+      <span id="hud-season">🌸 Spring ☀️ · Day 1/7</span>
     </div>
     <div id="hud-right">
       <span id="hud-tool">Hand Hoe</span>
@@ -36,8 +37,10 @@
   <!-- Bottom Tab Bar -->
   <nav id="tab-bar">
     <button class="tab-btn active" data-view="farm">🌾<br><small>Farm</small></button>
+    <button class="tab-btn" data-view="barn">🐄<br><small>Barn</small></button>
     <button class="tab-btn" data-view="home">🏠<br><small>Home</small></button>
     <button class="tab-btn" data-view="shop">🛒<br><small>Market</small></button>
+    <button class="tab-btn" data-view="quests">📜<br><small>Quests <span id="quest-badge" style="display:none;background:#e84040;color:#fff;border-radius:8px;padding:0 4px;font-size:9px;vertical-align:top;"></span></small></button>
     <button class="tab-btn" data-view="progression">⭐<br><small>Upgrades</small></button>
     <button class="tab-btn" data-view="skins">🎨<br><small>Skins</small></button>
     <button class="tab-btn" data-view="gems">💎<br><small>Gems</small></button>
@@ -66,13 +69,17 @@
   <!-- Modals -->
   <div id="modal-shop" class="modal"></div>
   <div id="modal-progression" class="modal"></div>
+  <div id="modal-crafting" class="modal"></div>
   <div id="modal-skins" class="modal"></div>
   <div id="modal-furniture" class="modal"></div>
   <div id="modal-gems" class="modal"></div>
+  <div id="modal-quests" class="modal"></div>
+  <div id="modal-barn" class="modal"></div>
+  <div id="modal-fishing" class="modal"></div>
 
   <!-- Controls help -->
   <div id="controls-help">
-    <strong>Controls:</strong> WASD/Arrows = Move &nbsp;|&nbsp; 1=Hoe 2=Water 3=Seed 4=Harvest &nbsp;|&nbsp; Q=Cycle seed &nbsp;|&nbsp; E=Sleep &nbsp;|&nbsp; Tap tile = Use tool
+    <strong>Controls:</strong> WASD/Arrows = Move &nbsp;|&nbsp; 1=Hoe 2=Water 3=Seed 4=Harvest 5=Fish &nbsp;|&nbsp; Q=Cycle seed &nbsp;|&nbsp; E=Sleep &nbsp;|&nbsp; Tap tile = Use tool
   </div>
 
   <script type="module" src="js/main.js"></script>

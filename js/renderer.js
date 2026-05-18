@@ -1,4 +1,4 @@
-import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE } from './constants.js';
+import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS } from './constants.js';
 
 // Deterministic pseudo-random per tile position
 function pr(x, y, s = 0) {
@@ -25,10 +25,12 @@ export class Renderer {
   get w() { return this.canvas.width; }
   get h() { return this.canvas.height; }
 
-  render(game, view) {
+  render(game, view, timestamp = 0) {
+    this._timestamp = timestamp;
     this.ctx.clearRect(0, 0, this.w, this.h);
     if (view === 'farm') this._renderFarm(game);
     else if (view === 'home') this._renderHome(game);
+    else if (view === 'barn') this._renderBarn(game);
   }
 
   // ── Farm ────────────────────────────────────────────────────────────────────
@@ -88,6 +90,13 @@ export class Renderer {
     this._drawPlayer(ctx, player);
 
     ctx.restore();
+
+    // Season + weather overlays (drawn over everything, in screen space)
+    this._drawSeasonOverlay(ctx, game.season);
+    if (game.weather === 'rainy' || game.weather === 'stormy') {
+      this._drawRainOverlay(ctx);
+    }
+    if (game.season === 3) this._drawSnowOverlay(ctx); // Winter
   }
 
   _drawWildBackground(ctx, farm) {
@@ -119,6 +128,15 @@ export class Renderer {
       const py = offY + row * TILE_SIZE;
       this._drawPineTree(ctx, px + TILE_SIZE / 2, py + TILE_SIZE / 2);
     });
+
+    // Fishing pond below-left of the farm
+    const pondX = offX + (-4) * TILE_SIZE + TILE_SIZE * 1.5;
+    const pondY = offY + (rows - 1) * TILE_SIZE + TILE_SIZE;
+    this._drawPond(ctx, pondX, pondY);
+    this._pondScreenX = pondX + farm.camX - TILE_SIZE;
+    this._pondScreenY = pondY + farm.camY - TILE_SIZE;
+    this._pondW = TILE_SIZE * 4;
+    this._pondH = TILE_SIZE * 2.5;
   }
 
   _drawWildTile(ctx, px, py, tx, ty) {
@@ -730,6 +748,244 @@ export class Renderer {
     ctx.fillRect(0, HOME_ROWS * tileH, this.w, 14);
     ctx.fillStyle = this._lighten(skinDef.roofColor, 20);
     ctx.fillRect(0, HOME_ROWS * tileH, this.w, 3);
+  }
+
+  // ── Season / Weather Overlays ─────────────────────────────────────────────
+
+  _drawSeasonOverlay(ctx, season) {
+    const tints = [null, 'rgba(255,220,100,0.06)', 'rgba(255,140,40,0.10)', 'rgba(100,140,220,0.12)'];
+    const tint = tints[season];
+    if (!tint) return;
+    ctx.fillStyle = tint;
+    ctx.fillRect(0, 0, this.w, this.h);
+  }
+
+  _drawRainOverlay(ctx) {
+    const t = (this._timestamp || 0) / 40;
+    ctx.strokeStyle = 'rgba(150,200,255,0.35)';
+    ctx.lineWidth = 1;
+    const spacing = 20;
+    for (let i = 0; i < Math.ceil(this.w / spacing) + Math.ceil(this.h / spacing); i++) {
+      const x = ((i * spacing - t * 3) % (this.w + this.h)) - this.h * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + this.h * 0.4, this.h);
+      ctx.stroke();
+    }
+  }
+
+  _drawSnowOverlay(ctx) {
+    const t = (this._timestamp || 0) / 60;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    for (let i = 0; i < 60; i++) {
+      const x = (i * 137.5 + t * 0.5) % this.w;
+      const y = (i * 97.3 + t) % this.h;
+      const r = 1 + (i % 3);
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // ── Fishing Pond ──────────────────────────────────────────────────────────
+
+  _drawPond(ctx, cx, cy) {
+    const rx = TILE_SIZE * 2, ry = TILE_SIZE * 1.2;
+
+    // Water
+    ctx.fillStyle = '#2a6080';
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Shimmer
+    ctx.fillStyle = 'rgba(100,200,255,0.3)';
+    ctx.beginPath(); ctx.ellipse(cx - rx * 0.2, cy - ry * 0.3, rx * 0.4, ry * 0.25, -0.3, 0, Math.PI * 2); ctx.fill();
+
+    // Lily pads
+    ctx.fillStyle = '#2a7820';
+    [[cx - 20, cy + 10], [cx + 30, cy - 10], [cx + 5, cy + 22]].forEach(([lx, ly]) => {
+      ctx.beginPath(); ctx.ellipse(lx, ly, 10, 7, 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3aaa28'; ctx.fillRect(lx - 1, ly - 7, 2, 7); ctx.fillStyle = '#2a7820';
+    });
+
+    // Shore edge
+    ctx.strokeStyle = '#4a8040';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+
+    // Label
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎣 Fishing', cx, cy + ry + 14);
+    ctx.textAlign = 'left';
+  }
+
+  isPondClick(screenX, screenY, farm) {
+    if (!this._pondScreenX) return false;
+    const px = screenX - (this._pondScreenX - farm.camX);
+    const py = screenY - (this._pondScreenY - farm.camY);
+    return px >= 0 && py >= 0 && px <= this._pondW && py <= this._pondH;
+  }
+
+  // ── Barn View ─────────────────────────────────────────────────────────────
+
+  _renderBarn(game) {
+    const { ctx } = this;
+
+    // Background
+    ctx.fillStyle = '#c8a060';
+    ctx.fillRect(0, 0, this.w, this.h);
+
+    // Barn wood wall texture
+    ctx.fillStyle = '#a07040';
+    for (let i = 0; i < Math.ceil(this.h / 30); i++) {
+      ctx.fillRect(0, i * 30, this.w, 2);
+    }
+
+    // Roof bar
+    ctx.fillStyle = '#8B2020';
+    ctx.fillRect(0, 0, this.w, 22);
+    ctx.fillStyle = '#aa3030';
+    ctx.fillRect(0, 0, this.w, 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(0, 0, this.w, 2);
+
+    // Title
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('🐄  Your Barn', this.w / 2, 15);
+    ctx.textAlign = 'left';
+
+    if (game.animals.length === 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '14px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('No animals yet. Buy some in the Market!', this.w / 2, this.h / 2);
+      ctx.textAlign = 'left';
+      return;
+    }
+
+    // Stall grid
+    const stallW = Math.min(180, Math.floor((this.w - 20) / Math.min(game.animals.length, 4)));
+    const stallH = 140;
+    const startX = (this.w - stallW * Math.min(game.animals.length, 4)) / 2;
+    const startY = 40;
+
+    game.animals.forEach((animal, i) => {
+      const col = i % 4, row = Math.floor(i / 4);
+      const sx = startX + col * stallW;
+      const sy = startY + row * (stallH + 10);
+      this._drawAnimalStall(ctx, sx, sy, stallW, stallH, animal);
+    });
+  }
+
+  _drawAnimalStall(ctx, sx, sy, sw, sh, animal) {
+    const def = ANIMALS[animal.kind];
+
+    // Stall floor
+    ctx.fillStyle = '#d4b060';
+    ctx.fillRect(sx + 4, sy, sw - 8, sh);
+    // Stall walls (darker sides)
+    ctx.fillStyle = '#a07840';
+    ctx.fillRect(sx + 4, sy, 6, sh);
+    ctx.fillRect(sx + sw - 10, sy, 6, sh);
+    ctx.fillRect(sx + 4, sy, sw - 8, 6);
+
+    // Hay
+    ctx.fillStyle = '#e8c840';
+    ctx.fillRect(sx + sw / 2 - 16, sy + sh - 24, 32, 12);
+    ctx.fillStyle = '#c8a820';
+    for (let i = 0; i < 4; i++) ctx.fillRect(sx + sw / 2 - 14 + i * 8, sy + sh - 22, 2, 10);
+
+    // Animal sprite
+    const cx = sx + sw / 2;
+    const cy = sy + sh / 2 - 10;
+    this._drawAnimalSprite(ctx, cx, cy, animal.kind, def.color);
+
+    // Fed indicator
+    ctx.fillStyle = animal.fed ? '#44ff44' : (animal.unhappyDays >= 2 ? '#ff4444' : '#ffaa00');
+    ctx.beginPath(); ctx.arc(sx + sw - 18, sy + 14, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(animal.fed ? '✓' : '!', sx + sw - 18, sy + 18);
+    ctx.textAlign = 'left';
+
+    // Name
+    ctx.fillStyle = '#5a3010';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(animal.name, cx, sy + sh - 5);
+    ctx.textAlign = 'left';
+  }
+
+  _drawAnimalSprite(ctx, cx, cy, kind, color) {
+    if (kind === 'chicken') {
+      // Body
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.ellipse(cx, cy + 5, 16, 12, 0, 0, Math.PI * 2); ctx.fill();
+      // Head
+      ctx.beginPath(); ctx.ellipse(cx + 12, cy - 6, 10, 8, 0.3, 0, Math.PI * 2); ctx.fill();
+      // Beak
+      ctx.fillStyle = '#f0a020';
+      ctx.beginPath(); ctx.moveTo(cx + 21, cy - 6); ctx.lineTo(cx + 28, cy - 4); ctx.lineTo(cx + 21, cy - 2); ctx.fill();
+      // Eye
+      ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(cx + 15, cy - 8, 2, 0, Math.PI * 2); ctx.fill();
+      // Comb
+      ctx.fillStyle = '#cc2020';
+      ctx.fillRect(cx + 10, cy - 15, 4, 6); ctx.fillRect(cx + 14, cy - 14, 4, 5);
+      // Legs
+      ctx.strokeStyle = '#f0a020'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx - 4, cy + 16); ctx.lineTo(cx - 4, cy + 24); ctx.lineTo(cx - 10, cy + 24); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + 4, cy + 16); ctx.lineTo(cx + 4, cy + 24); ctx.lineTo(cx + 10, cy + 24); ctx.stroke();
+    } else if (kind === 'cow') {
+      // Body
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.ellipse(cx, cy + 8, 24, 16, 0, 0, Math.PI * 2); ctx.fill();
+      // Spots
+      ctx.fillStyle = '#888';
+      ctx.beginPath(); ctx.ellipse(cx - 8, cy + 4, 8, 6, 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(cx + 10, cy + 12, 6, 5, -0.3, 0, Math.PI * 2); ctx.fill();
+      // Head
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.ellipse(cx + 22, cy - 2, 13, 10, 0.2, 0, Math.PI * 2); ctx.fill();
+      // Horns
+      ctx.fillStyle = '#d4b060';
+      ctx.fillRect(cx + 18, cy - 12, 3, 8); ctx.fillRect(cx + 26, cy - 12, 3, 8);
+      // Nose
+      ctx.fillStyle = '#f0b0a0';
+      ctx.beginPath(); ctx.ellipse(cx + 32, cy - 1, 6, 4, 0.1, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#c07060'; ctx.beginPath(); ctx.arc(cx + 30, cy, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + 34, cy, 1.5, 0, Math.PI * 2); ctx.fill();
+      // Eye
+      ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(cx + 24, cy - 5, 2.5, 0, Math.PI * 2); ctx.fill();
+      // Legs
+      ctx.fillStyle = '#c8c0b0';
+      [[-14, 24],[-6, 24],[6, 24],[14, 24]].forEach(([dx]) => {
+        ctx.fillRect(cx + dx - 3, cy + 22, 6, 14);
+      });
+      // Udder
+      ctx.fillStyle = '#f0b0b0';
+      ctx.beginPath(); ctx.ellipse(cx - 4, cy + 24, 10, 6, 0, 0, Math.PI * 2); ctx.fill();
+    } else { // sheep
+      // Fluffy body
+      ctx.fillStyle = color;
+      for (let i = 0; i < 7; i++) {
+        const fx = cx + [-12,-4,4,12,-8,0,8][i];
+        const fy = cy + [4,0,4,4,12,8,12][i];
+        ctx.beginPath(); ctx.arc(fx, fy, 10, 0, Math.PI * 2); ctx.fill();
+      }
+      // Face
+      ctx.fillStyle = '#c0b0a0';
+      ctx.beginPath(); ctx.ellipse(cx + 18, cy + 2, 10, 9, 0.1, 0, Math.PI * 2); ctx.fill();
+      // Eye
+      ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(cx + 22, cy - 1, 2, 0, Math.PI * 2); ctx.fill();
+      // Ear
+      ctx.fillStyle = '#d0b090';
+      ctx.beginPath(); ctx.ellipse(cx + 18, cy - 8, 4, 7, 0.3, 0, Math.PI * 2); ctx.fill();
+      // Legs
+      ctx.fillStyle = '#aaa';
+      [[-8,0],[0,0],[8,0]].forEach(([dx]) => {
+        ctx.fillRect(cx + dx - 3, cy + 20, 5, 14);
+      });
+    }
   }
 
   // ── Coordinate helpers ───────────────────────────────────────────────────────

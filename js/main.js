@@ -47,7 +47,7 @@ function loop(timestamp) {
   input.update();
   processInput(dt);
 
-  renderer.render(game, currentView);
+  renderer.render(game, currentView, timestamp);
   ui.updateHUD(game);
 
   saveInterval += dt;
@@ -63,14 +63,15 @@ function processInput(dt) {
   const { dx, dy } = input.getMoveDelta();
   game.player.move(dx, dy, game.farm, dt);
 
-  // Clamp camera so farm stays centered/scrollable
   clampCamera();
 
-  // Key-just-pressed actions
-  if (input.wasPressed('1')) { game.player.tool = 'hoe'; }
-  if (input.wasPressed('2')) { game.player.tool = 'water'; }
-  if (input.wasPressed('3')) { game.player.tool = 'seed'; }
-  if (input.wasPressed('4')) { game.player.tool = 'scythe'; }
+  // Tool selection keys
+  if (input.wasPressed('1')) { game.player.tool = 'hoe'; syncToolBar(); }
+  if (input.wasPressed('2')) { game.player.tool = 'water'; syncToolBar(); }
+  if (input.wasPressed('3')) { game.player.tool = 'seed'; syncToolBar(); }
+  if (input.wasPressed('4')) { game.player.tool = 'scythe'; syncToolBar(); }
+  if (input.wasPressed('5')) { game.player.tool = 'fishing'; syncToolBar(); }
+
   if (input.wasPressed('q') || input.wasPressed('Q')) {
     game.player.cycleSeed(Object.keys(CROPS));
   }
@@ -78,10 +79,7 @@ function processInput(dt) {
     doSleep();
   }
   if (input.wasPressed('b') || input.wasPressed('B')) {
-    ui.openShop(game,
-      (kind, n) => game.buySeed(kind, n),
-      (kind, n) => game.sellCrop(kind, n)
-    );
+    openShopModal();
   }
   if (input.wasPressed('Escape')) { ui.closeAllModals(); }
 
@@ -101,6 +99,19 @@ function handleCanvasClick(screenX, screenY) {
     return;
   }
 
+  if (currentView !== 'farm') return;
+
+  // Fishing rod + pond click
+  if (game.player.tool === 'fishing') {
+    if (renderer.isPondClick(screenX, screenY, game.farm)) {
+      openFishingGame();
+      return;
+    } else {
+      ui.notify('Walk to the pond to fish! 🎣');
+      return;
+    }
+  }
+
   const { tileX, tileY } = renderer.pixelToTile(game.farm, screenX, screenY);
   useTool(tileX, tileY);
 }
@@ -108,7 +119,6 @@ function handleCanvasClick(screenX, screenY) {
 function useTool(tx, ty) {
   const { player, farm } = game;
 
-  // On mobile, tap moves player to adjacent area then uses tool
   if (tx >= 0 && ty >= 0 && tx < farm.cols && ty < farm.rows) {
     player.gridX = Math.max(0, Math.min(farm.cols - 1, tx));
     player.gridY = Math.max(0, Math.min(farm.rows - 1, ty));
@@ -122,6 +132,10 @@ function useTool(tx, ty) {
     farm.water(tx, ty, aoe);
   } else if (player.tool === 'seed') {
     const kind = player.selectedSeed;
+    if (!game.canPlantCrop(kind)) {
+      ui.notify(`Can't plant ${CROPS[kind]?.label || kind} this season!`);
+      return;
+    }
     if ((game.seedInventory[kind] || 0) > 0) {
       if (farm.plant(tx, ty, kind)) {
         game.seedInventory[kind]--;
@@ -146,7 +160,23 @@ function useTool(tx, ty) {
 
 function doSleep() {
   game.sleepToNextDay();
-  ui.notify(`Day ${game.day} — Good morning! 🌅`);
+  const weatherIcons = { sunny: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️' };
+  const icon = weatherIcons[game.weather] || '🌅';
+  ui.notify(`Day ${game.day} — Good morning! ${icon}`);
+}
+
+function openFishingGame() {
+  ui.openFishingGame(game, (kind, def) => {
+    game.catchFish(kind);
+    if (def) ui.notify(`🐟 ${def.label} added to inventory!`);
+  });
+}
+
+function openShopModal() {
+  ui.openShop(game,
+    (kind, n) => game.buySeed(kind, n),
+    (kind, n) => game.sellCrop(kind, n)
+  );
 }
 
 function placeFurniture(def, tileX, tileY) {
@@ -164,7 +194,6 @@ function clampCamera() {
   const farmW = farm.cols * TILE_SIZE;
   const farmH = farm.rows * TILE_SIZE;
 
-  // Center player in view
   const targetCamX = game.player.gridX * TILE_SIZE - canvasW / 2 + TILE_SIZE / 2;
   const targetCamY = game.player.gridY * TILE_SIZE - canvasH / 2 + TILE_SIZE / 2;
 
@@ -172,26 +201,54 @@ function clampCamera() {
   farm.camY = Math.max(0, Math.min(targetCamY, Math.max(0, farmH - canvasH)));
 }
 
+function syncToolBar() {
+  const tool = game.player.tool;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+}
+
 function setupTabBar() {
   const tabs = document.querySelectorAll('.tab-btn');
   tabs.forEach(btn => {
     btn.addEventListener('click', () => {
       const view = btn.dataset.view;
-      currentView = view;
       tabs.forEach(t => t.classList.toggle('active', t.dataset.view === view));
       pendingFurniture = null;
 
-      if (view === 'shop') {
-        ui.openShop(game,
-          (kind, n) => game.buySeed(kind, n),
-          (kind, n) => game.sellCrop(kind, n)
-        );
+      if (view === 'farm') {
+        currentView = 'farm';
+        ui.closeAllModals();
+      } else if (view === 'home') {
+        currentView = 'home';
+        ui.closeAllModals();
+      } else if (view === 'barn') {
+        currentView = 'barn';
+        const feedAnimalFn = (id) => game.feedAnimal(id);
+        const refreshBarn = () => ui.openBarnActions(game, feedAnimalFn, refreshBarn);
+        ui.openBarnActions(game, feedAnimalFn, refreshBarn);
+      } else if (view === 'quests') {
+        currentView = 'farm';
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
+        const claimFn = (id) => { game.claimQuest(id); };
+        ui.openQuestLog(game, claimFn);
+      } else if (view === 'shop') {
+        currentView = 'farm';
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
+        openShopModal();
       } else if (view === 'progression') {
+        currentView = 'farm';
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
         ui.openProgression(game,
           (id, gems) => game.unlockFarmSize(id, gems),
-          (tool, tier, gems) => game.unlockMachinery(tool, tier, gems)
+          (tool, tier, gems) => game.unlockMachinery(tool, tier, gems),
+          {
+            onStartCraft: (slot, recipe) => game.startCraft(slot, recipe),
+            onCollect: (slot) => game.collectCraft(slot),
+            onUnlockSlot: () => game.unlockExtraCraftSlot(),
+          }
         );
       } else if (view === 'skins') {
+        currentView = 'farm';
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
         ui.openSkins(game,
           (id, cat) => game.buySkin(id, cat),
           (cat, id) => {
@@ -201,28 +258,33 @@ function setupTabBar() {
           }
         );
       } else if (view === 'gems') {
+        currentView = 'farm';
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
         ui.openGemStore(game);
-      } else if (view === 'home') {
-        currentView = 'home';
-        // Show furniture picker button
       }
     });
   });
 }
 
 function setupToolBar() {
-  const tools = ['hoe', 'water', 'seed', 'scythe'];
+  const toolDefs = [
+    { id: 'hoe',     icon: '⛏',  key: '1' },
+    { id: 'water',   icon: '💧',  key: '2' },
+    { id: 'seed',    icon: '🌱',  key: '3' },
+    { id: 'scythe',  icon: '🌾',  key: '4' },
+    { id: 'fishing', icon: '🎣',  key: '5' },
+  ];
   const bar = document.getElementById('toolbar');
-  tools.forEach((tool, i) => {
+  toolDefs.forEach(({ id, icon, key }) => {
     const btn = document.createElement('button');
     btn.className = 'tool-btn';
-    btn.dataset.tool = tool;
-    btn.innerHTML = `<span class="tool-icon">${{ hoe: '⛏', water: '💧', seed: '🌱', scythe: '🌾' }[tool]}</span><span class="tool-key">${i + 1}</span>`;
-    btn.title = `${tool} (${i + 1})`;
+    btn.dataset.tool = id;
+    btn.innerHTML = `<span class="tool-icon">${icon}</span><span class="tool-key">${key}</span>`;
+    btn.title = `${id} (${key})`;
     btn.addEventListener('click', () => {
-      game.player.tool = tool;
-      if (tool === 'seed') game.player.cycleSeed(Object.keys(CROPS));
-      document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+      game.player.tool = id;
+      if (id === 'seed') game.player.cycleSeed(Object.keys(CROPS));
+      syncToolBar();
     });
     bar.appendChild(btn);
   });
