@@ -5,6 +5,9 @@ export class Input {
     this._pendingJust = {};
     this.mouse = { x: 0, y: 0, clicked: false, _pendingClick: false };
     this.touch = { active: false, startX: 0, startY: 0, dx: 0, dy: 0, tapped: false, tapX: 0, tapY: 0 };
+    // On-screen D-pad held direction; merged into getMoveDelta() so touch
+    // movement runs through the same per-frame, delta-timed path as keys.
+    this.pad = { dx: 0, dy: 0 };
     this._bindEvents();
   }
 
@@ -91,6 +94,7 @@ export class Input {
     if (this.isDown('ArrowRight') || this.isDown('d') || this.isDown('D')) dx = 1;
     if (this.isDown('ArrowUp')    || this.isDown('w') || this.isDown('W')) dy = -1;
     if (this.isDown('ArrowDown')  || this.isDown('s') || this.isDown('S')) dy = 1;
+    if (dx === 0 && dy === 0) { dx = this.pad.dx; dy = this.pad.dy; }
     return { dx, dy };
   }
 }

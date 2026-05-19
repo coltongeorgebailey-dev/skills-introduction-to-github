@@ -15,6 +15,12 @@ let nearbyNpc = null;
 let lastTime = 0;
 let saveInterval = 0;
 let leafTimer = 0;
+let rafId = 0;
+
+// A backgrounded tab freezes rAF; on return the first frame's elapsed time
+// can be huge. Cap it so we never inject more than one slow frame of physics
+// at once (offline progression is reconciled separately on load).
+const MAX_FRAME_MS = 100;
 
 function init() {
   const saved = loadGame();
@@ -51,11 +57,23 @@ function init() {
     ui.notify('💎 Daily login bonus: +3 gems!', 3000);
   }
 
-  requestAnimationFrame(loop);
+  // Pause the loop while the tab is hidden; resume cleanly on return so the
+  // first visible frame starts a fresh delta instead of a multi-minute jump.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    } else if (rafId === 0) {
+      lastTime = 0;
+      rafId = requestAnimationFrame(loop);
+    }
+  });
+
+  rafId = requestAnimationFrame(loop);
 }
 
 function loop(timestamp) {
-  const dt = lastTime === 0 ? 0 : Math.min(timestamp - lastTime, 1000);
+  const dt = lastTime === 0 ? 0 : Math.min(timestamp - lastTime, MAX_FRAME_MS);
   lastTime = timestamp;
 
   input.update();
@@ -81,7 +99,7 @@ function loop(timestamp) {
   saveInterval += dt;
   if (saveInterval > 30000) { game.autoSave(); saveInterval = 0; }
 
-  requestAnimationFrame(loop);
+  rafId = requestAnimationFrame(loop);
 }
 
 function processInput(dt) {
@@ -453,21 +471,19 @@ function setupMobileControls() {
   dirs.forEach(({ id, dx, dy }) => {
     const btn = document.getElementById(id);
     if (!btn) return;
-    let interval = null;
-    const moveStep = () => {
-      game.player.move(dx, dy, game.worldBounds, (x, y) => game.isBlockedTile(x, y), 999);
-      clampCamera();
-      nearbyNpc = findNearbyNpc();
+    // Set a held direction; processInput() consumes it each frame through the
+    // same delta-timed game.player.move() path as the keyboard, so mobile and
+    // desktop movement share one physics/throttle.
+    const press = () => { input.pad.dx = dx; input.pad.dy = dy; };
+    const release = () => {
+      if (input.pad.dx === dx && input.pad.dy === dy) { input.pad.dx = 0; input.pad.dy = 0; }
     };
-    const start = () => {
-      moveStep();
-      interval = setInterval(moveStep, 150);
-    };
-    const stop = () => clearInterval(interval);
-    btn.addEventListener('touchstart', e => { e.preventDefault(); start(); }, { passive: false });
-    btn.addEventListener('touchend', e => { e.preventDefault(); stop(); }, { passive: false });
-    btn.addEventListener('mousedown', start);
-    btn.addEventListener('mouseup', stop);
+    btn.addEventListener('touchstart', e => { e.preventDefault(); press(); }, { passive: false });
+    btn.addEventListener('touchend', e => { e.preventDefault(); release(); }, { passive: false });
+    btn.addEventListener('touchcancel', e => { e.preventDefault(); release(); }, { passive: false });
+    btn.addEventListener('mousedown', press);
+    btn.addEventListener('mouseup', release);
+    btn.addEventListener('mouseleave', release);
   });
 }
 
