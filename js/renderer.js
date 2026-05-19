@@ -1,4 +1,4 @@
-import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE } from './constants.js';
+import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE, BUILDINGS } from './constants.js';
 
 // Deterministic pseudo-random per tile position
 function pr(x, y, s = 0) {
@@ -113,6 +113,9 @@ export class Renderer {
       ctx.strokeRect(at.x * TILE_SIZE + 2, at.y * TILE_SIZE + 2, TILE_SIZE - 4, TILE_SIZE - 4);
       ctx.setLineDash([]);
     }
+
+    // Buildings + NPCs outside the fence
+    this._drawBuildings(ctx, game);
 
     // Player
     this._drawPlayer(ctx, player);
@@ -666,8 +669,10 @@ export class Renderer {
       ctx.fillRect(x - 3, y - 3, 4, 2);
     };
 
-    // Top fence
+    // Top fence (gap = a gate the player walks through to reach the buildings)
+    const gateX0 = Math.floor(farm.cols / 2) - 1, gateX1 = gateX0 + 1;
     for (let x = 0; x < farm.cols; x++) {
+      if (x === gateX0 || x === gateX1) continue;
       drawH(x * TILE_SIZE, -18, TILE_SIZE);
       drawH(x * TILE_SIZE, -10, TILE_SIZE);
     }
@@ -688,7 +693,7 @@ export class Renderer {
     }
     // Posts at tile boundaries
     for (let x = 0; x <= farm.cols; x++) {
-      drawPost(x * TILE_SIZE, -14);
+      if (x !== gateX0 + 1) drawPost(x * TILE_SIZE, -14);
       drawPost(x * TILE_SIZE, fh + 8);
     }
     for (let y = 0; y <= farm.rows; y++) {
@@ -1193,6 +1198,136 @@ export class Renderer {
   }
 
   _darken(hex, amt) { return this._lighten(hex, -amt); }
+
+  // ── Buildings + NPCs ─────────────────────────────────────────────────────────
+
+  _drawBuildings(ctx, game) {
+    const { player } = game;
+    this._npcRects = [];
+    for (const b of BUILDINGS) {
+      const bx = b.x * TILE_SIZE;
+      const by = b.y * TILE_SIZE;
+      const bw = b.w * TILE_SIZE;
+      const bh = b.h * TILE_SIZE;
+
+      // Ground shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.fillRect(bx + 4, by + bh - 6, bw, 10);
+
+      // Walls
+      ctx.fillStyle = b.color;
+      ctx.fillRect(bx, by + 16, bw, bh - 16);
+      ctx.fillStyle = this._darken(b.color, 25);
+      ctx.fillRect(bx + bw - 6, by + 16, 6, bh - 16);
+      ctx.fillStyle = this._lighten(b.color, 25);
+      ctx.fillRect(bx, by + 16, bw, 3);
+
+      // Roof
+      ctx.fillStyle = this._darken(b.color, 45);
+      ctx.beginPath();
+      ctx.moveTo(bx - 6, by + 20);
+      ctx.lineTo(bx + bw / 2, by - 12);
+      ctx.lineTo(bx + bw + 6, by + 20);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = this._lighten(this._darken(b.color, 45), 18);
+      ctx.fillRect(bx + bw / 2 - 2, by - 10, 4, 30);
+
+      // Door
+      const doorW = 18, doorH = 28;
+      const doorX = bx + bw / 2 - doorW / 2;
+      const doorY = by + bh - doorH;
+      ctx.fillStyle = '#3a2410';
+      ctx.fillRect(doorX, doorY, doorW, doorH);
+      ctx.fillStyle = '#caa23a';
+      ctx.fillRect(doorX + doorW - 5, doorY + doorH / 2 - 1, 3, 3);
+
+      // Hanging sign with the icon
+      ctx.font = '20px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(b.icon, bx + bw / 2, by + 8);
+
+      // Label
+      ctx.font = 'bold 11px monospace';
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(b.label, bx + bw / 2, by - 20);
+      ctx.fillText(b.label, bx + bw / 2, by - 20);
+
+      // NPC
+      const npc = b.npc;
+      const nx = npc.x * TILE_SIZE;
+      const ny = npc.y * TILE_SIZE;
+      this._drawNpc(ctx, nx, ny, b.color);
+
+      const near = Math.max(Math.abs(player.gridX - npc.x), Math.abs(player.gridY - npc.y)) <= 1;
+      if (near) {
+        // Floating talk prompt
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 4;
+        ctx.font = 'bold 13px monospace';
+        const msg = '💬 Talk';
+        ctx.strokeText(msg, nx + TILE_SIZE / 2, ny - 14);
+        ctx.fillText(msg, nx + TILE_SIZE / 2, ny - 14);
+      }
+
+      this._npcRects.push({
+        action: b.action,
+        name: npc.name,
+        line: npc.line,
+        sx: nx - game.farm.camX,
+        sy: ny - game.farm.camY,
+        sw: TILE_SIZE,
+        sh: TILE_SIZE,
+      });
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  _drawNpc(ctx, px, py, accent) {
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath(); ctx.ellipse(px + 24, py + 42, 12, 5, 0, 0, Math.PI * 2); ctx.fill();
+    // Legs
+    ctx.fillStyle = '#3a2c5a';
+    ctx.fillRect(px + 16, py + 30, 7, 10);
+    ctx.fillRect(px + 25, py + 30, 7, 10);
+    // Body
+    ctx.fillStyle = accent;
+    ctx.fillRect(px + 13, py + 18, 22, 14);
+    ctx.fillStyle = this._lighten(accent, 30);
+    ctx.fillRect(px + 13, py + 18, 22, 3);
+    // Arms
+    ctx.fillStyle = accent;
+    ctx.fillRect(px + 7, py + 19, 7, 12);
+    ctx.fillRect(px + 34, py + 19, 7, 12);
+    // Head
+    ctx.fillStyle = '#f0c090';
+    ctx.fillRect(px + 14, py + 4, 20, 16);
+    // Eyes
+    ctx.fillStyle = '#222';
+    ctx.fillRect(px + 18, py + 11, 4, 4);
+    ctx.fillRect(px + 27, py + 11, 4, 4);
+    // Hair
+    ctx.fillStyle = this._darken(accent, 30);
+    ctx.fillRect(px + 13, py + 2, 22, 5);
+  }
+
+  // Returns the NPC under a screen point (for tap-to-talk), or null.
+  npcAt(screenX, screenY) {
+    if (!this._npcRects) return null;
+    for (const r of this._npcRects) {
+      if (screenX >= r.sx && screenX <= r.sx + r.sw &&
+          screenY >= r.sy && screenY <= r.sy + r.sh) {
+        return r;
+      }
+    }
+    return null;
+  }
 
   // ── Home ─────────────────────────────────────────────────────────────────────
 

@@ -6,6 +6,7 @@ import {
   FISH,
   QUESTS,
   DAY_MS, OFFLINE_DAY_CAP,
+  WORLD_PAD, BUILDINGS,
 } from './constants.js';
 import { Farm } from './farm.js';
 import { Player } from './player.js';
@@ -69,6 +70,24 @@ export class Game {
     const size = FARM_SIZES[0];
     this.farm = new Farm(size.cols, size.rows);
     this.player = new Player();
+  }
+
+  // Walkable world bounds (tiles): the farm grid plus the wild pad on all sides.
+  get worldBounds() {
+    return {
+      minX: -WORLD_PAD,
+      minY: -WORLD_PAD,
+      maxX: this.farm.cols + WORLD_PAD,
+      maxY: this.farm.rows + WORLD_PAD,
+    };
+  }
+
+  // True if (tx,ty) is inside any building footprint (non-walkable).
+  isBlockedTile(tx, ty) {
+    for (const b of BUILDINGS) {
+      if (tx >= b.x && tx < b.x + b.w && ty >= b.y && ty < b.y + b.h) return true;
+    }
+    return false;
   }
 
   // Auto-Drip (tier 3 watering can) keeps every crop watered with no manual taps

@@ -1,5 +1,29 @@
 export const TILE_SIZE = 48;
 
+// Walkable wild space (in tiles) around the farm fence on every side.
+export const WORLD_PAD = 7;
+
+// Buildings live outside the fence in the wild band. The player walks up to
+// the NPC (stationed one tile below the building's door) and talks to enter.
+// Footprint = tiles [x .. x+w-1] x [y .. y+h-1]; coords are world tiles
+// (negative / beyond farm cols-rows = outside the fence).
+export const BUILDINGS = [
+  { id: 'market',   action: 'market',   icon: '🛒', label: 'Market',   color: '#c98a3a', x: -6, y: -4, w: 2, h: 2,
+    npc: { x: -6, y: -2, name: 'Shopkeep', line: 'Welcome to the Market! Buy seeds or sell your harvest.' } },
+  { id: 'barn',     action: 'barn',     icon: '🐄', label: 'Barn',     color: '#b5552f', x: -3, y: -4, w: 2, h: 2,
+    npc: { x: -3, y: -2, name: 'Rancher', line: 'Come on in and check on your animals.' } },
+  { id: 'home',     action: 'home',     icon: '🏠', label: 'Home',     color: '#d4a86a', x:  0, y: -4, w: 2, h: 2,
+    npc: { x:  0, y: -2, name: 'Home',    line: 'Home sweet home. Decorate however you like!' } },
+  { id: 'upgrades', action: 'upgrades', icon: '⭐', label: 'Upgrades', color: '#6a8fc9', x:  3, y: -4, w: 2, h: 2,
+    npc: { x:  3, y: -2, name: 'Engineer', line: 'Need better tools? I can upgrade your gear.' } },
+  { id: 'skins',    action: 'skins',    icon: '🎨', label: 'Skins',    color: '#b06ac9', x:  6, y: -4, w: 2, h: 2,
+    npc: { x:  6, y: -2, name: 'Tailor',  line: 'Fancy a fresh new look?' } },
+  { id: 'gems',     action: 'gems',     icon: '💎', label: 'Gems',     color: '#3aa0c9', x:  9, y: -4, w: 2, h: 2,
+    npc: { x:  9, y: -2, name: 'Jeweler', line: 'Gems for sale — shiny, rare, and powerful!' } },
+  { id: 'quests',   action: 'quests',   icon: '📜', label: 'Quests',   color: '#c9b03a', x: 12, y: -4, w: 2, h: 2,
+    npc: { x: 12, y: -2, name: 'Mayor',   line: 'The town needs your help. Check the quest board!' } },
+];
+
 export const FARM_SIZES = [
   { id: 1, cols: 10, rows: 8,  name: 'Starter Plot', coinCost: 0,     gemCost: 0   },
   { id: 2, cols: 15, rows: 12, name: 'Small Farm',   coinCost: 2000,  gemCost: 50  },

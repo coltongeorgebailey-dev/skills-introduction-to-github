@@ -14,7 +14,7 @@ export class Player {
     this._moveDelay = 140; // ms between steps
   }
 
-  move(dx, dy, farm, dt) {
+  move(dx, dy, bounds, isBlocked, dt) {
     this._moveTimer -= dt;
     if (this._moveTimer > 0 || (dx === 0 && dy === 0)) return false;
     if (dx !== 0 || dy !== 0) {
@@ -23,7 +23,8 @@ export class Player {
     }
     const nx = this.gridX + dx;
     const ny = this.gridY + dy;
-    if (nx >= 0 && ny >= 0 && nx < farm.cols && ny < farm.rows) {
+    const inBounds = nx >= bounds.minX && ny >= bounds.minY && nx < bounds.maxX && ny < bounds.maxY;
+    if (inBounds && !(isBlocked && isBlocked(nx, ny))) {
       this.gridX = nx;
       this.gridY = ny;
       this._moveTimer = this._moveDelay;
