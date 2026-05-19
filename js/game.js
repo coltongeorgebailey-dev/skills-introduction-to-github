@@ -7,6 +7,8 @@ import {
   QUESTS,
   DAY_MS, OFFLINE_DAY_CAP,
   WORLD_PAD, BUILDINGS,
+  STARTING_ENERGY, MAX_ENERGY,
+  SEASON_CROP_PRICES,
 } from './constants.js';
 import { Farm } from './farm.js';
 import { Player } from './player.js';
@@ -27,8 +29,12 @@ export class Game {
     this.houseSkin = 'classic';
 
     // Crop inventories
-    this.seedInventory = { wheat: 5, tomato: 2, corn: 0, pumpkin: 0, golden_wheat: 0 };
-    this.harvestInventory = { wheat: 0, tomato: 0, corn: 0, pumpkin: 0, golden_wheat: 0 };
+    this.seedInventory     = { wheat: 5, tomato: 2, corn: 0, pumpkin: 0, parsnip: 0, golden_wheat: 0 };
+    this.harvestInventory  = { wheat: 0, tomato: 0, corn: 0, pumpkin: 0, parsnip: 0, golden_wheat: 0 };
+
+    // Energy / stamina (resets each day)
+    this.energy    = STARTING_ENERGY;
+    this.maxEnergy = MAX_ENERGY;
 
     // Seasons & weather
     this.season = 0;       // index into SEASONS
@@ -134,8 +140,11 @@ export class Game {
     this.seasonDay++;
     if (this.seasonDay >= SEASON_DAYS) {
       this.seasonDay = 0;
+      const prevSeason = this.season;
       this.season = (this.season + 1) % 4;
       if (this.season === 0) this.milestones.seasonsCompleted++;
+      // Signal season change so main.js can fire particles + notification
+      this._seasonChanged = { from: prevSeason, to: this.season };
     }
   }
 
@@ -181,9 +190,13 @@ export class Game {
       this.milestones.rainyDays++;
     }
 
+    this._seasonChanged = null; // reset before _advanceSeason may set it
     this._advanceSeason();
     this.day++;
     this.milestones.daysPlayed++;
+
+    // Reset energy each new day
+    this.energy = this.maxEnergy;
 
     this._collectAnimalProducts();
     this._advanceCrafting();
@@ -228,7 +241,7 @@ export class Game {
     const def = CROPS[kind];
     if (!def || (this.harvestInventory[kind] || 0) < count) return false;
     this.harvestInventory[kind] -= count;
-    const earned = def.sellPrice * count;
+    const earned = this.effectiveSellPrice(kind) * count;
     this.coins += earned;
     this.totalCoinsEarned += earned;
     return true;
@@ -236,13 +249,30 @@ export class Game {
 
   addHarvest(harvested) {
     let total = 0;
+    const weatherDef = this.currentWeatherDef();
+    const bonus = weatherDef.yieldBonus || 0;
+    const bonusApplied = {};
     for (const [kind, count] of Object.entries(harvested)) {
-      this.harvestInventory[kind] = (this.harvestInventory[kind] || 0) + count;
-      this.milestones.cropsGrownByKind[kind] = (this.milestones.cropsGrownByKind[kind] || 0) + count;
-      total += count;
+      // Weather yield bonus: extra crops dropped on rainy/stormy days
+      const extra = bonus > 0 ? Math.floor(count * bonus) : 0;
+      const finalCount = count + extra;
+      this.harvestInventory[kind] = (this.harvestInventory[kind] || 0) + finalCount;
+      this.milestones.cropsGrownByKind[kind] = (this.milestones.cropsGrownByKind[kind] || 0) + finalCount;
+      total += finalCount;
+      if (extra > 0) bonusApplied[kind] = extra;
     }
     this.milestones.totalHarvested += total;
+    this._lastHarvestBonus = Object.keys(bonusApplied).length > 0 ? bonusApplied : null;
     return total;
+  }
+
+  // Returns the effective sell price of a crop given the current season.
+  effectiveSellPrice(kind) {
+    const def = CROPS[kind];
+    if (!def) return 0;
+    const seasonName = SEASONS[this.season];
+    const mult = SEASON_CROP_PRICES[kind]?.[seasonName] ?? 1;
+    return Math.round(def.sellPrice * mult);
   }
 
   unlockFarmSize(id, useGems = false) {
@@ -373,11 +403,11 @@ export class Game {
 
   collectCraft(slotIdx) {
     const slot = this.craftingSlots[slotIdx];
-    if (!slot || !slot.done) return false;
+    if (!slot || !slot.done) return null;
     this.artisanInventory[slot.recipeKey] = (this.artisanInventory[slot.recipeKey] || 0) + 1;
     this.craftingSlots[slotIdx] = null;
     this.milestones.crafted++;
-    return true;
+    return RECIPES[slot.recipeKey] || { label: 'item' };
   }
 
   sellArtisan(recipeKey, count = 1) {
@@ -486,6 +516,7 @@ export class Game {
       farmSizeId: this.farmSizeId, machineryTiers: this.machineryTiers,
       ownedSkins: this.ownedSkins, homeLayout: this.homeLayout, houseSkin: this.houseSkin,
       seedInventory: this.seedInventory, harvestInventory: this.harvestInventory,
+      energy: this.energy, maxEnergy: this.maxEnergy,
       season: this.season, seasonDay: this.seasonDay, weather: this.weather,
       animals: this.animals, feedBags: this.feedBags, animalProducts: this.animalProducts,
       craftingSlots: this.craftingSlots, artisanInventory: this.artisanInventory, craftingSlotsUnlocked: this.craftingSlotsUnlocked,
@@ -504,7 +535,11 @@ export class Game {
     g.farmSizeId = d.farmSizeId; g.machineryTiers = d.machineryTiers;
     g.ownedSkins = d.ownedSkins || ['default', 'classic'];
     g.homeLayout = d.homeLayout || []; g.houseSkin = d.houseSkin || 'classic';
-    g.seedInventory = d.seedInventory; g.harvestInventory = d.harvestInventory;
+    // Merge saved inventories with defaults so new crops (parsnip) appear in old saves
+    g.seedInventory    = { parsnip: 0, ...d.seedInventory };
+    g.harvestInventory = { parsnip: 0, ...d.harvestInventory };
+    g.energy    = d.energy    ?? STARTING_ENERGY;
+    g.maxEnergy = d.maxEnergy ?? MAX_ENERGY;
     g.season = d.season || 0; g.seasonDay = d.seasonDay || 0; g.weather = d.weather || 'sunny';
     g.animals = d.animals || []; g.feedBags = d.feedBags ?? 10; g.animalProducts = d.animalProducts || { egg: 0, milk: 0, wool: 0 };
     g.craftingSlots = d.craftingSlots || [null, null]; g.artisanInventory = d.artisanInventory || {}; g.craftingSlotsUnlocked = d.craftingSlotsUnlocked || 1;

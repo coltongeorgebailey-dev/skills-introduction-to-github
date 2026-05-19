@@ -18,6 +18,21 @@ export class UI {
       seasonEl.textContent = `${SEASON_ICONS[game.season]} ${SEASONS[game.season]} ${wDef.icon} · D${game.seasonDay + 1}/7`;
     }
 
+    // Energy bar
+    const energyEl = document.getElementById('hud-energy');
+    if (energyEl && game.energy !== undefined) {
+      const pct = Math.round((game.energy / game.maxEnergy) * 100);
+      energyEl.style.setProperty('--energy-pct', `${pct}%`);
+      energyEl.title = `Energy: ${game.energy} / ${game.maxEnergy}`;
+      const fill = energyEl.querySelector('.energy-fill');
+      if (fill) {
+        fill.style.width = `${pct}%`;
+        fill.style.background = pct > 40 ? '#5aaa30' : pct > 15 ? '#f5c842' : '#e84040';
+      }
+      const label = energyEl.querySelector('.energy-label');
+      if (label) label.textContent = `⚡${game.energy}`;
+    }
+
     const questBadge = document.getElementById('quest-badge');
     if (questBadge) {
       const count = game.unclaimedQuestCount();
@@ -189,10 +204,10 @@ export class UI {
       if (items.length === 0) return;
       hasItems = true;
       const section = this._makeSection(title);
-      items.forEach(({ icon, label, count, value, onSell }) => {
+      items.forEach(({ icon, label, count, value, priceLabel, onSell }) => {
         const right = document.createElement('div');
         right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
-        right.appendChild(this._makeCostBadge(`${value} 🪙`));
+        right.appendChild(this._makeCostBadge(priceLabel || `${value} 🪙`));
         right.appendChild(this._makeBtn('Sell All', 'btn-primary', () => { onSell(); refresh(); }));
         section.appendChild(this._makeItemRow(icon, label, `×${count}`, right));
       });
@@ -203,8 +218,13 @@ export class UI {
       .filter(([, count]) => count > 0)
       .map(([kind, count]) => {
         const def = CROPS[kind];
-        return { icon: '', label: def.label, count, value: def.sellPrice * count,
-          onSell: () => { onSellCrop(kind, count); this.notify(`Sold ${count} ${def.label}!`); }};
+        const effectivePrice = game.effectiveSellPrice(kind);
+        const isBoost = effectivePrice > def.sellPrice;
+        const priceLabel = isBoost ? `${effectivePrice} 🪙 📈` : `${effectivePrice} 🪙`;
+        return { icon: '', label: def.label, count,
+          value: effectivePrice * count,
+          priceLabel,
+          onSell: () => { onSellCrop(kind, count); this.notify(`Sold ${count} ${def.label} for ${effectivePrice * count} 🪙!`); }};
       }));
 
     addSection('Artisan Goods', Object.entries(game.artisanInventory || {})

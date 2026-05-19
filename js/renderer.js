@@ -17,8 +17,13 @@ export class Renderer {
   }
 
   _resize() {
-    this.canvas.width = this.canvas.offsetWidth;
-    this.canvas.height = this.canvas.offsetHeight;
+    // getBoundingClientRect is reliable after layout; offsetWidth may still reflect
+    // the canvas's intrinsic 300×150 default at DOMContentLoaded construction time.
+    const r = this.canvas.getBoundingClientRect();
+    const w = Math.round(r.width)  || this.canvas.offsetWidth;
+    const h = Math.round(r.height) || this.canvas.offsetHeight;
+    if (w > 0) this.canvas.width  = w;
+    if (h > 0) this.canvas.height = h;
     if (this.ctx) this.ctx.imageSmoothingEnabled = false;
   }
 
@@ -28,6 +33,14 @@ export class Renderer {
   shake(intensity, duration) {
     this._shakeIntensity = intensity;
     this._shakeEnd = Date.now() + duration;
+  }
+
+  // Brief full-screen colour flash (e.g. black for sleep, white for season change)
+  flashScreen(color, durationMs) {
+    this._flashColor = color;
+    this._flashEnd = Date.now() + durationMs;
+    this._flashStart = Date.now();
+    this._flashDuration = durationMs;
   }
 
   render(game, view, timestamp = 0, particles = null) {
@@ -52,6 +65,19 @@ export class Renderer {
 
     // Particles drawn in screen space after everything else
     if (particles) particles.draw(ctx);
+
+    // Screen flash overlay (sleep / season change)
+    if (this._flashEnd && Date.now() < this._flashEnd) {
+      const elapsed = Date.now() - this._flashStart;
+      const t = elapsed / this._flashDuration;
+      // Fade in then out (peak at t=0.3)
+      const alpha = t < 0.3 ? t / 0.3 : 1 - (t - 0.3) / 0.7;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.fillStyle = this._flashColor || '#000000';
+      ctx.fillRect(0, 0, this.w, this.h);
+      ctx.restore();
+    }
   }
 
   // ── Farm ────────────────────────────────────────────────────────────────────

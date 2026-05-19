@@ -4,7 +4,7 @@ import { UI } from './ui.js';
 import { Input } from './input.js';
 import { loadGame } from './save.js';
 import { checkStripeReturn } from './iap.js';
-import { CROPS, TILE_SIZE, BUILDINGS } from './constants.js';
+import { CROPS, TILE_SIZE, BUILDINGS, SEASONS, SEASON_ICONS } from './constants.js';
 import * as audio from './audio.js';
 import * as particles from './particles.js';
 
@@ -40,6 +40,9 @@ function init() {
   setupMobileControls();
   setupSeedCarousel();
 
+  // Snap camera to player immediately (avoid lerp-from-origin black screen on first frame)
+  snapCamera();
+
   // First-run tutorial
   if (!game.tutorialSeen) {
     ui.openTutorial(() => {
@@ -72,9 +75,18 @@ function init() {
   rafId = requestAnimationFrame(loop);
 }
 
+let _firstFrame = true;
+
 function loop(timestamp) {
   const dt = lastTime === 0 ? 0 : Math.min(timestamp - lastTime, MAX_FRAME_MS);
   lastTime = timestamp;
+
+  // On the very first rendered frame, the canvas has its true CSS size — snap camera now.
+  if (_firstFrame) {
+    renderer._resize();
+    snapCamera();
+    _firstFrame = false;
+  }
 
   input.update();
   processInput(dt);
@@ -91,6 +103,7 @@ function loop(timestamp) {
     }
   }
 
+  checkGameEvents();
   renderer.render(game, currentView, timestamp, particles);
   ui.updateHUD(game);
   syncSeedCarousel();
@@ -143,14 +156,16 @@ function findNearbyNpc() {
   for (const b of BUILDINGS) {
     const n = b.npc;
     if (Math.max(Math.abs(gridX - n.x), Math.abs(gridY - n.y)) <= 1) {
-      return { action: b.action, name: n.name, line: n.line };
+      return { action: b.action, name: n.name, lines: n.lines || [n.line] };
     }
   }
   return null;
 }
 
 function interactWith(npc) {
-  ui.notify(`${npc.name}: ${npc.line}`, 2600);
+  const lines = npc.lines || (npc.line ? [npc.line] : ['Hello!']);
+  const line = lines[Math.floor(Math.random() * lines.length)];
+  ui.notify(`${npc.name}: ${line}`, 2600);
   const a = npc.action;
   if (a === 'market') openShopModal();
   else if (a === 'upgrades') openProgressionModal();
@@ -221,6 +236,12 @@ function _tileScreenCenter(tx, ty) {
 function useTool(tx, ty) {
   const { player, farm } = game;
 
+  // Energy check — each tool use costs 1 energy
+  if (game.energy <= 0) {
+    ui.notify('⚡ Out of energy! Sleep to restore it.');
+    return;
+  }
+
   if (tx >= 0 && ty >= 0 && tx < farm.cols && ty < farm.rows) {
     const ddx = tx - player.gridX, ddy = ty - player.gridY;
     if (Math.abs(ddx) > Math.abs(ddy)) { player.facingDX = Math.sign(ddx); player.facingDY = 0; }
@@ -229,15 +250,17 @@ function useTool(tx, ty) {
 
   const { px, py } = _tileScreenCenter(tx, ty);
 
+  let didAct = false;
   if (player.tool === 'hoe') {
     const aoe = game.getToolAoe('hoe');
     const count = farm.till(tx, ty, aoe);
-    if (count > 0) { audio.playTill(); particles.emit(px, py, 'plant'); }
+    if (count > 0) { audio.playTill(); particles.emit(px, py, 'plant'); didAct = true; }
   } else if (player.tool === 'water') {
     const aoe = game.getToolAoe('wateringCan');
     farm.water(tx, ty, aoe);
     audio.playWater();
     particles.emit(px, py, 'water');
+    didAct = true;
   } else if (player.tool === 'seed') {
     const kind = player.selectedSeed;
     if (!game.canPlantCrop(kind)) {
@@ -249,6 +272,7 @@ function useTool(tx, ty) {
         game.seedInventory[kind]--;
         audio.playPlant();
         particles.emit(px, py, 'plant');
+        didAct = true;
       } else {
         ui.notify('Tile must be tilled first!');
       }
@@ -261,24 +285,51 @@ function useTool(tx, ty) {
     const total = game.addHarvest(harvested);
     if (total > 0) {
       const names = Object.entries(harvested).map(([k, v]) => `${v} ${CROPS[k]?.label}`).join(', ');
-      ui.notify(`Harvested: ${names}!`);
+      let msg = `Harvested: ${names}!`;
+      if (game._lastHarvestBonus) {
+        const bonusStr = Object.entries(game._lastHarvestBonus).map(([k,v])=>`+${v} ${CROPS[k]?.label}`).join(', ');
+        msg += ` ☔ Weather bonus: ${bonusStr}`;
+      }
+      ui.notify(msg);
       audio.playHarvest();
       particles.emit(px, py, 'harvest');
       renderer.shake(3, 150);
+      didAct = true;
     }
   }
+
+  // Deduct energy only when something actually happened
+  if (didAct) game.energy = Math.max(0, game.energy - 1);
 
   clampCamera();
 }
 
+// Checks game-state flags set during game.tick (season change, etc.)
+// and fires particles/notifications in the UI layer.
+function checkGameEvents() {
+  if (game._seasonChanged) {
+    const { to } = game._seasonChanged;
+    const name = SEASONS[to];
+    const icon = SEASON_ICONS[to];
+    ui.notify(`${icon} Welcome to ${name}! Prices have changed — check the Market.`, 4000);
+    particles.emit(renderer.w / 2, renderer.h / 2, 'levelUp');
+    renderer.shake(4, 250);
+    renderer.flashScreen('#ffffff18', 500);
+    game._seasonChanged = null;
+  }
+}
+
 function doSleep() {
+  renderer.flashScreen('#000020', 320);
   game.sleepToNextDay();
   const weatherIcons = { sunny: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️' };
   const icon = weatherIcons[game.weather] || '🌅';
-  ui.notify(`⏭️ Day ${game.day} · ${icon} ${game.weather}`);
+  ui.notify(`⏭️ Day ${game.day} · ${icon} ${game.weather} · ⚡${game.energy}/${game.maxEnergy}`);
 }
 
 function openFishingGame() {
+  if (game.energy < 2) { ui.notify('⚡ Need at least 2 energy to fish!'); return; }
+  game.energy = Math.max(0, game.energy - 2);
   ui.openFishingGame(game, (kind, def) => {
     game.catchFish(kind);
     if (def) {
@@ -336,6 +387,22 @@ function placeFurniture(def, tileX, tileY) {
   ui.notify(`Placed ${def.label}!`);
 }
 
+// Hard-snap camera to player (called once on init to avoid lerp-from-zero black screen)
+function snapCamera() {
+  const { farm } = game;
+  const canvasW = renderer.w;
+  const canvasH = renderer.h;
+  const b = game.worldBounds;
+  const worldMinX = b.minX * TILE_SIZE;
+  const worldMinY = b.minY * TILE_SIZE;
+  const worldW = (b.maxX - b.minX) * TILE_SIZE;
+  const worldH = (b.maxY - b.minY) * TILE_SIZE;
+  const targetCamX = game.player.gridX * TILE_SIZE - canvasW / 2 + TILE_SIZE / 2;
+  const targetCamY = game.player.gridY * TILE_SIZE - canvasH / 2 + TILE_SIZE / 2;
+  farm.camX = Math.max(worldMinX, Math.min(targetCamX, worldMinX + Math.max(0, worldW - canvasW)));
+  farm.camY = Math.max(worldMinY, Math.min(targetCamY, worldMinY + Math.max(0, worldH - canvasH)));
+}
+
 function clampCamera() {
   const { farm } = game;
   const canvasW = renderer.w;
@@ -349,8 +416,12 @@ function clampCamera() {
   const targetCamX = game.player.gridX * TILE_SIZE - canvasW / 2 + TILE_SIZE / 2;
   const targetCamY = game.player.gridY * TILE_SIZE - canvasH / 2 + TILE_SIZE / 2;
 
-  farm.camX = Math.max(worldMinX, Math.min(targetCamX, worldMinX + Math.max(0, worldW - canvasW)));
-  farm.camY = Math.max(worldMinY, Math.min(targetCamY, worldMinY + Math.max(0, worldH - canvasH)));
+  const clampedX = Math.max(worldMinX, Math.min(targetCamX, worldMinX + Math.max(0, worldW - canvasW)));
+  const clampedY = Math.max(worldMinY, Math.min(targetCamY, worldMinY + Math.max(0, worldH - canvasH)));
+
+  // Smooth camera follow (lerp) — feels like Stardew Valley instead of instant snap
+  farm.camX += (clampedX - farm.camX) * 0.14;
+  farm.camY += (clampedY - farm.camY) * 0.14;
 }
 
 function syncToolBar() {
@@ -359,7 +430,7 @@ function syncToolBar() {
   syncSeedCarousel();
 }
 
-const CROP_ICONS = { wheat: '🌾', tomato: '🍅', corn: '🌽', pumpkin: '🎃', golden_wheat: '✨' };
+const CROP_ICONS = { wheat: '🌾', tomato: '🍅', corn: '🌽', pumpkin: '🎃', parsnip: '🥕', golden_wheat: '✨' };
 
 function syncSeedCarousel() {
   const carousel = document.getElementById('seed-carousel');
