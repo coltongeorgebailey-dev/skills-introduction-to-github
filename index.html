@@ -32,25 +32,16 @@
   <!-- Notification toast -->
   <div id="notification"></div>
 
-  <!-- Bottom Tab Bar (6 tabs) -->
-  <nav id="tab-bar">
-    <button class="tab-btn active" data-view="farm">🌾<br><small>Farm</small></button>
-    <button class="tab-btn" data-view="barn">🐄<br><small>Barn</small></button>
-    <button class="tab-btn" data-view="home">🏠<br><small>Home</small></button>
-    <button class="tab-btn" data-view="shop">🛒<br><small>Market</small></button>
-    <button class="tab-btn" data-view="quests">📜<br><small>Quests <span id="quest-badge" style="display:none;background:#e84040;color:#fff;border-radius:8px;padding:0 4px;font-size:9px;vertical-align:top;"></span></small></button>
-    <button class="tab-btn" data-view="more">☰<br><small>More</small></button>
-  </nav>
-
   <!-- Tool Bar -->
   <div id="toolbar-wrap">
     <div id="toolbar"></div>
     <div id="seed-carousel" style="display:none">
       <button id="seed-prev">◀</button>
-      <span id="seed-label">🌾 Wheat</span>
+      <span id="seed-label">🌾 Wheat ×0</span>
       <button id="seed-next">▶</button>
     </div>
     <div id="toolbar-actions">
+      <button id="btn-talk" title="Talk to the NPC (Enter)" style="display:none">💬 Talk</button>
       <button id="btn-sleep" title="Skip to next day (E)">⏭️ Skip Day</button>
     </div>
   </div>
@@ -66,17 +57,6 @@
     <button id="dpad-down">▼</button>
   </div>
 
-  <!-- "More" bottom sheet -->
-  <div id="sheet-more">
-    <div id="sheet-more-inner">
-      <div id="sheet-more-handle"></div>
-      <button class="sheet-option-btn" data-modal="progression">⭐<br><span>Upgrades</span></button>
-      <button class="sheet-option-btn" data-modal="skins">🎨<br><span>Skins</span></button>
-      <button class="sheet-option-btn" data-modal="gems">💎<br><span>Gem Store</span></button>
-    </div>
-  </div>
-  <div id="sheet-overlay"></div>
-
   <!-- Modals -->
   <div id="modal-shop" class="modal"></div>
   <div id="modal-progression" class="modal"></div>
@@ -90,7 +70,7 @@
 
   <!-- Controls help (desktop only) -->
   <div id="controls-help">
-    <strong>Controls:</strong> WASD/Arrows = Move &nbsp;|&nbsp; 1=Hoe 2=Water 3=Seed 4=Harvest 5=Fish &nbsp;|&nbsp; Q=Cycle seed &nbsp;|&nbsp; E=Skip Day &nbsp;|&nbsp; Tap tile = Use tool
+    <strong>Controls:</strong> WASD/Arrows = Move &nbsp;|&nbsp; 1=Hoe 2=Water 3=Seed 4=Harvest 5=Fish &nbsp;|&nbsp; Q=Cycle seed &nbsp;|&nbsp; E=Skip Day &nbsp;|&nbsp; Walk out the gate &amp; press Enter to talk to a shopkeeper &nbsp;|&nbsp; Esc=Back to farm
   </div>
 
   <script type="module" src="js/main.js"></script>

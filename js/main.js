@@ -4,13 +4,14 @@ import { UI } from './ui.js';
 import { Input } from './input.js';
 import { loadGame } from './save.js';
 import { checkStripeReturn } from './iap.js';
-import { CROPS, TILE_SIZE } from './constants.js';
+import { CROPS, TILE_SIZE, BUILDINGS } from './constants.js';
 import * as audio from './audio.js';
 import * as particles from './particles.js';
 
 let game, renderer, ui, input;
 let currentView = 'farm';
 let pendingFurniture = null;
+let nearbyNpc = null;
 let lastTime = 0;
 let saveInterval = 0;
 
@@ -25,13 +26,12 @@ function init() {
   input.bindCanvas(canvas);
 
   checkStripeReturn(game, ui);
-  setupTabBar();
   setupToolBar();
   setupSleepBtn();
+  setupTalkBtn();
   setupMuteBtn();
   setupMobileControls();
   setupSeedCarousel();
-  setupMoreSheet();
 
   // First-run tutorial
   if (!game.tutorialSeen) {
@@ -64,6 +64,8 @@ function loop(timestamp) {
 
   renderer.render(game, currentView, timestamp, particles);
   ui.updateHUD(game);
+  syncSeedCarousel();
+  updateTalkBtn();
 
   saveInterval += dt;
   if (saveInterval > 30000) { game.autoSave(); saveInterval = 0; }
@@ -72,12 +74,20 @@ function loop(timestamp) {
 }
 
 function processInput(dt) {
+  // Global: leave a building view / close menus
+  if (input.wasPressed('Escape')) {
+    ui.closeAllModals();
+    if (currentView !== 'farm') currentView = 'farm';
+  }
+
   if (currentView !== 'farm') return;
 
   const { dx, dy } = input.getMoveDelta();
-  game.player.move(dx, dy, game.farm, dt);
+  game.player.move(dx, dy, game.worldBounds, (x, y) => game.isBlockedTile(x, y), dt);
 
   clampCamera();
+
+  nearbyNpc = findNearbyNpc();
 
   if (input.wasPressed('1')) { game.player.tool = 'hoe';     syncToolBar(); }
   if (input.wasPressed('2')) { game.player.tool = 'water';   syncToolBar(); }
@@ -90,11 +100,50 @@ function processInput(dt) {
     syncSeedCarousel();
   }
   if (input.wasPressed('e') || input.wasPressed('E')) { doSleep(); }
-  if (input.wasPressed('b') || input.wasPressed('B')) { openShopModal(); }
-  if (input.wasPressed('Escape')) { ui.closeAllModals(); closeMoreSheet(); }
+  if (input.wasPressed('Enter') || input.wasPressed(' ')) {
+    if (nearbyNpc) interactWith(nearbyNpc);
+  }
 
   if (input.mouse.clicked) {
     handleCanvasClick(input.mouse.x, input.mouse.y);
+  }
+}
+
+function findNearbyNpc() {
+  const { gridX, gridY } = game.player;
+  for (const b of BUILDINGS) {
+    const n = b.npc;
+    if (Math.max(Math.abs(gridX - n.x), Math.abs(gridY - n.y)) <= 1) {
+      return { action: b.action, name: n.name, line: n.line };
+    }
+  }
+  return null;
+}
+
+function interactWith(npc) {
+  ui.notify(`${npc.name}: ${npc.line}`, 2600);
+  const a = npc.action;
+  if (a === 'market') openShopModal();
+  else if (a === 'upgrades') openProgressionModal();
+  else if (a === 'skins') openSkinsModal();
+  else if (a === 'gems') ui.openGemStore(game);
+  else if (a === 'quests') {
+    const claimFn = (id) => {
+      if (game.claimQuest(id)) {
+        audio.playQuestComplete();
+        particles.emit(renderer.w / 2, renderer.h / 2, 'levelUp');
+        renderer.shake(5, 200);
+      }
+    };
+    ui.openQuestLog(game, claimFn);
+  } else if (a === 'barn') {
+    currentView = 'barn';
+    const feedAnimalFn = (id) => { if (game.feedAnimal(id)) audio.playFeed(); };
+    const refreshBarn = () => ui.openBarnActions(game, feedAnimalFn, refreshBarn);
+    ui.openBarnActions(game, feedAnimalFn, refreshBarn);
+  } else if (a === 'home') {
+    currentView = 'home';
+    ui.closeAllModals();
   }
 }
 
@@ -109,6 +158,16 @@ function handleCanvasClick(screenX, screenY) {
   }
 
   if (currentView !== 'farm') return;
+
+  const tappedNpc = renderer.npcAt(screenX, screenY);
+  if (tappedNpc) {
+    const n = game.player;
+    const close = BUILDINGS.some(b => b.action === tappedNpc.action &&
+      Math.max(Math.abs(n.gridX - b.npc.x), Math.abs(n.gridY - b.npc.y)) <= 1);
+    if (close) { interactWith(tappedNpc); return; }
+    ui.notify(`Walk closer to talk to the ${tappedNpc.name}.`);
+    return;
+  }
 
   if (game.player.tool === 'fishing') {
     if (renderer.isPondClick(screenX, screenY, game.farm)) {
@@ -252,14 +311,17 @@ function clampCamera() {
   const { farm } = game;
   const canvasW = renderer.w;
   const canvasH = renderer.h;
-  const farmW = farm.cols * TILE_SIZE;
-  const farmH = farm.rows * TILE_SIZE;
+  const b = game.worldBounds;
+  const worldMinX = b.minX * TILE_SIZE;
+  const worldMinY = b.minY * TILE_SIZE;
+  const worldW = (b.maxX - b.minX) * TILE_SIZE;
+  const worldH = (b.maxY - b.minY) * TILE_SIZE;
 
   const targetCamX = game.player.gridX * TILE_SIZE - canvasW / 2 + TILE_SIZE / 2;
   const targetCamY = game.player.gridY * TILE_SIZE - canvasH / 2 + TILE_SIZE / 2;
 
-  farm.camX = Math.max(0, Math.min(targetCamX, Math.max(0, farmW - canvasW)));
-  farm.camY = Math.max(0, Math.min(targetCamY, Math.max(0, farmH - canvasH)));
+  farm.camX = Math.max(worldMinX, Math.min(targetCamX, worldMinX + Math.max(0, worldW - canvasW)));
+  farm.camY = Math.max(worldMinY, Math.min(targetCamY, worldMinY + Math.max(0, worldH - canvasH)));
 }
 
 function syncToolBar() {
@@ -280,7 +342,21 @@ function syncSeedCarousel() {
     const kind = game.player.selectedSeed;
     const def = CROPS[kind];
     const icon = CROP_ICONS[kind] || '🌱';
-    label.textContent = def ? `${icon} ${def.label}` : kind;
+    const qty = game.seedInventory[kind] || 0;
+    label.textContent = def ? `${icon} ${def.label} ×${qty}` : kind;
+    label.classList.toggle('seed-empty', qty === 0);
+  }
+  const seedBtn = document.querySelector('[data-tool="seed"]');
+  if (seedBtn) {
+    let badge = seedBtn.querySelector('.seed-count');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'seed-count';
+      seedBtn.appendChild(badge);
+    }
+    const qty = game.seedInventory[game.player.selectedSeed] || 0;
+    badge.textContent = qty;
+    badge.classList.toggle('seed-empty', qty === 0);
   }
 }
 
@@ -298,73 +374,18 @@ function setupSeedCarousel() {
   });
 }
 
-function openMoreSheet() {
-  document.getElementById('sheet-more')?.classList.add('open');
-  document.getElementById('sheet-overlay')?.classList.add('active');
-}
-
-function closeMoreSheet() {
-  document.getElementById('sheet-more')?.classList.remove('open');
-  document.getElementById('sheet-overlay')?.classList.remove('active');
-}
-
-function setupMoreSheet() {
-  document.getElementById('sheet-overlay')?.addEventListener('click', closeMoreSheet);
-
-  document.querySelectorAll('.sheet-option-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      closeMoreSheet();
-      const modal = btn.dataset.modal;
-      if (modal === 'progression') openProgressionModal();
-      else if (modal === 'skins') openSkinsModal();
-      else if (modal === 'gems') ui.openGemStore(game);
-    });
+function setupTalkBtn() {
+  document.getElementById('btn-talk')?.addEventListener('click', () => {
+    if (nearbyNpc) interactWith(nearbyNpc);
   });
 }
 
-function setupTabBar() {
-  const tabs = document.querySelectorAll('.tab-btn');
-  tabs.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const view = btn.dataset.view;
-      pendingFurniture = null;
-
-      if (view === 'more') {
-        openMoreSheet();
-        return;
-      }
-
-      tabs.forEach(t => t.classList.toggle('active', t.dataset.view === view));
-
-      if (view === 'farm') {
-        currentView = 'farm';
-        ui.closeAllModals();
-      } else if (view === 'home') {
-        currentView = 'home';
-        ui.closeAllModals();
-      } else if (view === 'barn') {
-        currentView = 'barn';
-        const feedAnimalFn = (id) => { if (game.feedAnimal(id)) audio.playFeed(); };
-        const refreshBarn = () => ui.openBarnActions(game, feedAnimalFn, refreshBarn);
-        ui.openBarnActions(game, feedAnimalFn, refreshBarn);
-      } else if (view === 'quests') {
-        currentView = 'farm';
-        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
-        const claimFn = (id) => {
-          if (game.claimQuest(id)) {
-            audio.playQuestComplete();
-            particles.emit(renderer.w / 2, renderer.h / 2, 'levelUp');
-            renderer.shake(5, 200);
-          }
-        };
-        ui.openQuestLog(game, claimFn);
-      } else if (view === 'shop') {
-        currentView = 'farm';
-        tabs.forEach(t => t.classList.toggle('active', t.dataset.view === 'farm'));
-        openShopModal();
-      }
-    });
-  });
+function updateTalkBtn() {
+  const btn = document.getElementById('btn-talk');
+  if (!btn) return;
+  const show = currentView === 'farm' && !!nearbyNpc;
+  btn.style.display = show ? '' : 'none';
+  if (show) btn.textContent = `💬 Talk to ${nearbyNpc.name}`;
 }
 
 function setupToolBar() {
@@ -381,7 +402,10 @@ function setupToolBar() {
     btn.className = 'tool-btn';
     btn.dataset.tool = id;
     btn.title = `${label} (${key})`;
-    btn.innerHTML = `<span class="tool-icon">${icon}</span><span class="tool-label">${label}</span>`;
+    btn.innerHTML =
+      `<span class="tool-key-badge">${key}</span>` +
+      `<span class="tool-icon">${icon}</span>` +
+      `<span class="tool-label">${label}</span>`;
     btn.addEventListener('click', () => {
       game.player.tool = id;
       if (id === 'seed') game.player.cycleSeed(Object.keys(CROPS));
@@ -390,6 +414,7 @@ function setupToolBar() {
     bar.appendChild(btn);
   });
   document.querySelector('[data-tool="hoe"]')?.classList.add('active');
+  syncSeedCarousel();
 }
 
 function setupSleepBtn() {
@@ -418,9 +443,14 @@ function setupMobileControls() {
     const btn = document.getElementById(id);
     if (!btn) return;
     let interval = null;
+    const moveStep = () => {
+      game.player.move(dx, dy, game.worldBounds, (x, y) => game.isBlockedTile(x, y), 999);
+      clampCamera();
+      nearbyNpc = findNearbyNpc();
+    };
     const start = () => {
-      game.player.move(dx, dy, game.farm, 999);
-      interval = setInterval(() => game.player.move(dx, dy, game.farm, 999), 150);
+      moveStep();
+      interval = setInterval(moveStep, 150);
     };
     const stop = () => clearInterval(interval);
     btn.addEventListener('touchstart', e => { e.preventDefault(); start(); }, { passive: false });
