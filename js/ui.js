@@ -33,6 +33,22 @@ export class UI {
     this._notifTimer = setTimeout(() => this.$notification.classList.remove('show'), duration);
   }
 
+  // ─── Modal manager ───────────────────────────────────────────────────────────
+  // Single open/close path for every modal so behaviour (and any future
+  // animation/stack handling) lives in one place instead of being duplicated
+  // in each open* method's closeFn.
+
+  _openModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('active');
+    return el;
+  }
+
+  _closeModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  }
+
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
   _makeModalHeader(icon, title, closeFn) {
@@ -102,11 +118,10 @@ export class UI {
   // ─── Market Modal (tabbed) ────────────────────────────────────────────────────
 
   openShop(game, onBuySeed, onSellCrop, initialTab = 'seeds') {
-    const modal = document.getElementById('modal-shop');
+    const modal = this._openModal('modal-shop');
     modal.innerHTML = '';
-    modal.classList.add('active');
 
-    const closeFn = () => modal.classList.remove('active');
+    const closeFn = () => this._closeModal('modal-shop');
     modal.appendChild(this._makeModalHeader('🛒', 'Market', closeFn));
 
     // Inner tab strip
@@ -120,15 +135,20 @@ export class UI {
     const contentWrap = document.createElement('div');
     contentWrap.style.cssText = 'flex:1;overflow-y:auto;padding:12px 14px 16px;display:flex;flex-direction:column;gap:10px;';
 
+    // Refresh after a transaction rebuilds only the content list, not the
+    // whole modal — header/tabs stay put and scroll isn't blown away.
+    let currentTab = initialTab;
     const renderTab = (tabId) => {
+      currentTab = tabId;
       contentWrap.innerHTML = '';
       tabDefs.forEach(t => {
         const btn = tabs.querySelector(`[data-tab="${t.id}"]`);
         if (btn) btn.classList.toggle('active', t.id === tabId);
       });
-      if (tabId === 'seeds') this._shopSeeds(contentWrap, game, onBuySeed, () => this.openShop(game, onBuySeed, onSellCrop, 'seeds'));
-      if (tabId === 'sell')  this._shopSell(contentWrap, game, onSellCrop, () => this.openShop(game, onBuySeed, onSellCrop, 'sell'));
-      if (tabId === 'animals') this._shopAnimals(contentWrap, game, () => this.openShop(game, onBuySeed, onSellCrop, 'animals'));
+      const refresh = () => renderTab(currentTab);
+      if (tabId === 'seeds') this._shopSeeds(contentWrap, game, onBuySeed, refresh);
+      if (tabId === 'sell')  this._shopSell(contentWrap, game, onSellCrop, refresh);
+      if (tabId === 'animals') this._shopAnimals(contentWrap, game, refresh);
     };
 
     tabDefs.forEach(({ id, label }) => {
@@ -251,11 +271,10 @@ export class UI {
   // ─── Progression Modal ────────────────────────────────────────────────────────
 
   openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks) {
-    const modal = document.getElementById('modal-progression');
+    const modal = this._openModal('modal-progression');
     modal.innerHTML = '';
-    modal.classList.add('active');
 
-    const closeFn = () => modal.classList.remove('active');
+    const closeFn = () => this._closeModal('modal-progression');
     modal.appendChild(this._makeModalHeader('⭐', 'Upgrades', closeFn));
 
     const body = this._makeBody();
@@ -379,11 +398,10 @@ export class UI {
   // ─── Skins Modal ──────────────────────────────────────────────────────────────
 
   openSkins(game, onBuySkin, onEquipSkin) {
-    const modal = document.getElementById('modal-skins');
+    const modal = this._openModal('modal-skins');
     modal.innerHTML = '';
-    modal.classList.add('active');
 
-    const closeFn = () => modal.classList.remove('active');
+    const closeFn = () => this._closeModal('modal-skins');
     modal.appendChild(this._makeModalHeader('🎨', 'Skins', closeFn));
 
     const body = this._makeBody();
@@ -418,11 +436,10 @@ export class UI {
   // ─── Furniture Picker ─────────────────────────────────────────────────────────
 
   openFurniturePicker(game, onPlace) {
-    const modal = document.getElementById('modal-furniture');
+    const modal = this._openModal('modal-furniture');
     modal.innerHTML = '';
-    modal.classList.add('active');
 
-    const closeFn = () => modal.classList.remove('active');
+    const closeFn = () => this._closeModal('modal-furniture');
     modal.appendChild(this._makeModalHeader('🏠', 'Furniture', closeFn));
 
     const body = this._makeBody();
@@ -434,7 +451,7 @@ export class UI {
       right.appendChild(this._makeCostBadge(`${def.cost} 🪙`));
       right.appendChild(this._makeBtn('Place', 'btn-primary', () => {
         if (game.coins < def.cost) { this.notify('Not enough coins!'); return; }
-        modal.classList.remove('active');
+        closeFn();
         this.notify(`Tap the home grid to place ${def.label}`);
         onPlace(def);
       }));
@@ -447,7 +464,7 @@ export class UI {
     clearRow.className = 'item-row';
     clearRow.style.justifyContent = 'center';
     clearRow.appendChild(this._makeBtn('🗑️ Clear All Furniture', 'btn-secondary', () => {
-      game.homeLayout = []; game.autoSave(); modal.classList.remove('active'); this.notify('Cleared!');
+      game.homeLayout = []; game.autoSave(); closeFn(); this.notify('Cleared!');
     }));
     clearSection.appendChild(clearRow);
     body.appendChild(clearSection);
@@ -458,11 +475,10 @@ export class UI {
   // ─── Gem Store ────────────────────────────────────────────────────────────────
 
   openGemStore(game) {
-    const modal = document.getElementById('modal-gems');
+    const modal = this._openModal('modal-gems');
     modal.innerHTML = '';
-    modal.classList.add('active');
 
-    const closeFn = () => modal.classList.remove('active');
+    const closeFn = () => this._closeModal('modal-gems');
     modal.appendChild(this._makeModalHeader('💎', 'Gem Store', closeFn));
 
     const body = this._makeBody();
@@ -489,11 +505,10 @@ export class UI {
   // ─── Quest Log ────────────────────────────────────────────────────────────────
 
   openQuestLog(game, onClaim) {
-    const modal = document.getElementById('modal-quests');
+    const modal = this._openModal('modal-quests');
     modal.innerHTML = '';
-    modal.classList.add('active');
 
-    const closeFn = () => modal.classList.remove('active');
+    const closeFn = () => this._closeModal('modal-quests');
     modal.appendChild(this._makeModalHeader('📜', 'Quests', closeFn));
 
     const body = this._makeBody();
@@ -537,11 +552,10 @@ export class UI {
   // ─── Barn Actions ─────────────────────────────────────────────────────────────
 
   openBarnActions(game, onFeed, onRefresh) {
-    const modal = document.getElementById('modal-barn');
+    const modal = this._openModal('modal-barn');
     modal.innerHTML = '';
-    modal.classList.add('active');
 
-    const closeFn = () => { modal.classList.remove('active'); };
+    const closeFn = () => this._closeModal('modal-barn');
     modal.appendChild(this._makeModalHeader('🐄', 'Barn', closeFn));
 
     const body = this._makeBody();
@@ -578,9 +592,8 @@ export class UI {
   // ─── Tutorial ─────────────────────────────────────────────────────────────────
 
   openTutorial(onClose) {
-    const modal = document.getElementById('modal-tutorial');
+    const modal = this._openModal('modal-tutorial');
     modal.innerHTML = '';
-    modal.classList.add('active');
 
     const header = document.createElement('div');
     header.className = 'modal-header';
@@ -608,7 +621,7 @@ export class UI {
     const btn = document.createElement('button');
     btn.textContent = "Let's farm! 🚜";
     btn.className = 'tutorial-start';
-    btn.onclick = () => { modal.classList.remove('active'); onClose(); };
+    btn.onclick = () => { this._closeModal('modal-tutorial'); onClose(); };
     body.appendChild(btn);
     modal.appendChild(body);
   }
@@ -616,11 +629,10 @@ export class UI {
   // ─── Fishing Mini-Game ────────────────────────────────────────────────────────
 
   openFishingGame(game, onCatch) {
-    const modal = document.getElementById('modal-fishing');
+    const modal = this._openModal('modal-fishing');
     modal.innerHTML = '';
-    modal.classList.add('active');
 
-    const closeFn = () => { modal.classList.remove('active'); this._stopFishing && this._stopFishing(); };
+    const closeFn = () => { this._closeModal('modal-fishing'); this._stopFishing && this._stopFishing(); };
     modal.appendChild(this._makeModalHeader('🎣', 'Fishing', closeFn));
 
     const body = document.createElement('div');
@@ -716,6 +728,6 @@ export class UI {
   }
 
   closeAllModals() {
-    document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
+    document.querySelectorAll('.modal.active').forEach(m => m.classList.remove('active'));
   }
 }
