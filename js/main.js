@@ -14,6 +14,7 @@ let pendingFurniture = null;
 let nearbyNpc = null;
 let lastTime = 0;
 let saveInterval = 0;
+let leafTimer = 0;
 
 function init() {
   const saved = loadGame();
@@ -61,6 +62,16 @@ function loop(timestamp) {
   processInput(dt);
   game.tick(dt);
   particles.tick(dt);
+
+  // Ambient drifting leaves on the farm (skip Winter)
+  if (currentView === 'farm' && game.season !== 3) {
+    leafTimer += dt;
+    if (leafTimer > 1500) {
+      leafTimer = 0;
+      const lx = renderer.w * (0.4 + Math.random() * 0.6);
+      particles.emit(lx, -10, game.season === 2 ? 'leafFall' : 'leaf');
+    }
+  }
 
   renderer.render(game, currentView, timestamp, particles);
   ui.updateHUD(game);

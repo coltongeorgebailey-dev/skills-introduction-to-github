@@ -162,3 +162,36 @@ export const STARTING_COINS = 100;
 export const STARTING_GEMS = 10;
 export const HOME_COLS = 8;
 export const HOME_ROWS = 6;
+
+// ── Art palette (Cozy Forest Cottage look) ───────────────────────────────────
+// Centralized warm tones so the renderer stays consistent. Per-season sky pairs
+// are [top, horizon]. foliage is a dark→light 3-tone ramp for tree canopies.
+export const PALETTE = {
+  sky: [
+    ['#9fd0e8', '#e9f1d6'], // Spring  — soft blue → pale cream
+    ['#bfe0ec', '#fdf2cf'], // Summer  — bright, warm horizon
+    ['#cdbf9a', '#f3d6a0'], // Fall    — hazy amber
+    ['#aebfcf', '#dfe7ee'], // Winter  — cool grey-blue
+  ],
+  treeline: ['#3a5a28', '#46683a', '#324f24', '#6b6a44'], // per season
+  foliage:  ['#2f6a26', '#4a9a34', '#79c64a'],            // dark, mid, highlight
+  foliageFall: ['#7a5a1c', '#c08828', '#e6b048'],         // autumn canopy
+  trunk:     '#6b4524',
+  trunkHi:   '#8f6238',
+  cloud:     'rgba(255,255,255,0.88)',
+  cloudSoft: 'rgba(255,255,255,0.55)',
+  plaster:   '#efe2c4', // cottage wall infill
+  timber:    '#6b4a2c', // half-timber beams
+  timberHi:  '#8a6440',
+  stone:     '#8d8a82', // chimney
+  stoneHi:   '#a8a59c',
+  roof:      '#7a4a2a', // shingle base
+  roofHi:    '#9a6438',
+  roofShade: '#5c3720',
+  glassWarm: '#f6d98a', // lit windows
+  path:      '#caa46a',
+  pathShade: '#a9824a',
+  shadow:    'rgba(0,0,0,0.18)',
+  warmGlow:  'rgba(255,210,130,0.06)',
+  vignette:  'rgba(0,0,0,0.13)',
+};
