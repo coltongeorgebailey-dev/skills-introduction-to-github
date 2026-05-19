@@ -1,4 +1,4 @@
-import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS } from './constants.js';
+import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE } from './constants.js';
 
 // Deterministic pseudo-random per tile position
 function pr(x, y, s = 0) {
@@ -59,23 +59,24 @@ export class Renderer {
   _renderFarm(game) {
     const { ctx } = this;
     const { farm, player } = game;
+    this._season = game.season;
 
-    // Wild nature background
-    ctx.fillStyle = '#3d6e22';
+    // Lush ground base (warm grass gradient instead of a flat fill)
+    const g = ctx.createLinearGradient(0, 0, 0, this.h);
+    g.addColorStop(0, '#6fb441');
+    g.addColorStop(1, '#56962f');
+    ctx.fillStyle = g;
     ctx.fillRect(0, 0, this.w, this.h);
     this._drawWildBackground(ctx, farm);
 
     ctx.save();
     ctx.translate(-farm.camX, -farm.camY);
 
-    // Sandy dirt border around the farm
-    const bw = 32;
-    ctx.fillStyle = '#b89050';
-    ctx.fillRect(-bw, -bw, farm.cols * TILE_SIZE + bw * 2, farm.rows * TILE_SIZE + bw * 2);
-    // Inner shadow of border
-    ctx.fillStyle = '#9a7438';
-    ctx.fillRect(-bw, -bw, farm.cols * TILE_SIZE + bw * 2, 6);
-    ctx.fillRect(-bw, farm.rows * TILE_SIZE + bw - 6, farm.cols * TILE_SIZE + bw * 2, 6);
+    // Dirt path border framing the plot
+    this._drawFarmBorder(ctx, farm);
+
+    // Decorative scenery (cottage, shed, barrels, flower beds) behind the fence
+    this._drawProps(ctx, farm);
 
     // Fence
     this._drawFence(ctx, farm);
@@ -118,12 +119,80 @@ export class Renderer {
 
     ctx.restore();
 
-    // Season + weather overlays (drawn over everything, in screen space)
+    // Atmosphere & lighting (screen space, over everything)
+    this._drawClouds(ctx);
     this._drawSeasonOverlay(ctx, game.season);
     if (game.weather === 'rainy' || game.weather === 'stormy') {
       this._drawRainOverlay(ctx);
     }
     if (game.season === 3) this._drawSnowOverlay(ctx); // Winter
+    this._drawWarmth(ctx);
+  }
+
+  // Soft drifting clouds → reads as moving daylight in a top-down scene
+  _drawClouds(ctx) {
+    const t = (this._timestamp || 0) / 1000;
+    ctx.save();
+    const blobs = [
+      { bx: 0.12, by: 0.16, s: 1.0, spd: 7 },
+      { bx: 0.55, by: 0.09, s: 1.4, spd: 5 },
+      { bx: 0.80, by: 0.30, s: 0.9, spd: 9 },
+      { bx: 0.35, by: 0.45, s: 1.1, spd: 6 },
+    ];
+    blobs.forEach((c, i) => {
+      const span = this.w + 260;
+      const cx = ((c.bx * span + t * c.spd) % span) - 130;
+      const cy = c.by * this.h;
+      const r = 34 * c.s;
+      ctx.fillStyle = PALETTE.cloudSoft;
+      [[-r, 4, r * 0.9], [0, -6, r * 1.15], [r, 2, r * 0.85], [r * 1.8, 8, r * 0.6]]
+        .forEach(([dx, dy, rr]) => {
+          ctx.beginPath();
+          ctx.ellipse(cx + dx, cy + dy, rr, rr * 0.62, 0, 0, Math.PI * 2);
+          ctx.fill();
+        });
+    });
+    ctx.restore();
+  }
+
+  // Warm golden glow + gentle vignette for the cozy reference mood
+  _drawWarmth(ctx) {
+    ctx.save();
+    ctx.fillStyle = PALETTE.warmGlow;
+    ctx.fillRect(0, 0, this.w, this.h);
+    const v = ctx.createRadialGradient(
+      this.w / 2, this.h / 2, Math.min(this.w, this.h) * 0.35,
+      this.w / 2, this.h / 2, Math.max(this.w, this.h) * 0.72
+    );
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, PALETTE.vignette);
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, this.w, this.h);
+    ctx.restore();
+  }
+
+  // Dirt path framing the plot (replaces the flat sandy band)
+  _drawFarmBorder(ctx, farm) {
+    const bw = 34;
+    const fw = farm.cols * TILE_SIZE, fh = farm.rows * TILE_SIZE;
+    ctx.fillStyle = PALETTE.path;
+    ctx.fillRect(-bw, -bw, fw + bw * 2, fh + bw * 2);
+    // Worn inner edge
+    ctx.fillStyle = PALETTE.pathShade;
+    ctx.fillRect(-bw, -bw, fw + bw * 2, 7);
+    ctx.fillRect(-bw, fh + bw - 7, fw + bw * 2, 7);
+    ctx.fillRect(-bw, -bw, 7, fh + bw * 2);
+    ctx.fillRect(fw + bw - 7, -bw, 7, fh + bw * 2);
+    // Stepping-stone speckle
+    for (let i = 0; i < 90; i++) {
+      const r = pr(i, i * 3, 7);
+      const sx = -bw + (r % (fw + bw * 2));
+      const sy = -bw + ((r >> 8) % (fw + bw * 2)) % (fh + bw * 2);
+      // keep speckle on the border ring only
+      if (sx > 4 && sx < fw - 4 && sy > 4 && sy < fh - 4) continue;
+      ctx.fillStyle = (r & 1) ? 'rgba(150,118,70,0.6)' : 'rgba(200,170,120,0.6)';
+      ctx.fillRect(sx, sy, 4 + (r & 3), 3 + ((r >> 2) & 2));
+    }
   }
 
   _drawWildBackground(ctx, farm) {
@@ -145,15 +214,18 @@ export class Renderer {
       }
     }
 
-    // Trees scattered in the wild
-    const treePositions = [
-      [-3,-2],[cols+1,-2],[cols+1,rows+1],[-3,rows+1],
-      [-3, 2],[cols+1, 3],[-3, 5],[cols+1, 6],
+    // Distant leafy forest filling the screen edges (depth behind the plot)
+    const edgeTrees = [
+      [-3,-2],[-3,1],[-3,4],[-3,7],[-3,10],
+      [cols+1,-2],[cols+1,1],[cols+1,4],[cols+1,7],[cols+1,10],
+      [2,-3],[6,-3],[10,-3],[14,-3],[18,-3],
+      [2,rows+2],[7,rows+2],[12,rows+2],[17,rows+2],
     ];
-    treePositions.forEach(([col, row]) => {
+    edgeTrees.forEach(([col, row]) => {
       const px = offX + col * TILE_SIZE;
       const py = offY + row * TILE_SIZE;
-      this._drawPineTree(ctx, px + TILE_SIZE / 2, py + TILE_SIZE / 2);
+      const seed = ((col & 7) << 3) ^ (row & 7);
+      this._drawLeafyTree(ctx, px + TILE_SIZE / 2, py + TILE_SIZE / 2, 0.92 + (seed % 5) * 0.12, seed);
     });
 
     // Fishing pond below-left of the farm
@@ -232,6 +304,345 @@ export class Renderer {
       ctx.fillStyle = leafLight;
       ctx.fillRect(cx - 3, y - h / 2 - 1, 5, 4);
     });
+  }
+
+  // Lush rounded deciduous tree — layered canopy blobs in a 3-tone ramp
+  _drawLeafyTree(ctx, cx, cy, scale = 1, seed = 0) {
+    const fall = this._season === 2;
+    const [dark, mid, light] = fall ? PALETTE.foliageFall : PALETTE.foliage;
+    const s = scale;
+
+    // Ground shadow
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 26 * s, 26 * s, 8 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Trunk
+    ctx.fillStyle = PALETTE.trunk;
+    ctx.fillRect(cx - 5 * s, cy - 2 * s, 10 * s, 30 * s);
+    ctx.fillStyle = PALETTE.trunkHi;
+    ctx.fillRect(cx - 5 * s, cy - 2 * s, 3 * s, 30 * s);
+
+    // Canopy — overlapping blobs, deterministic jitter from seed
+    const blob = (dx, dy, r, col) => {
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.ellipse(cx + dx * s, cy + dy * s, r * s, r * 0.92 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    const j = (n) => ((pr(seed, n, 3) % 7) - 3);
+    // dark base
+    blob(-12 + j(1), -20 + j(2), 16, dark);
+    blob(12 + j(3), -18 + j(4), 16, dark);
+    blob(0 + j(5), -30 + j(6), 18, dark);
+    blob(0 + j(7), -10 + j(8), 19, dark);
+    // mid
+    blob(-9, -22, 13, mid);
+    blob(9, -20, 13, mid);
+    blob(0, -31, 14, mid);
+    blob(-2, -13, 14, mid);
+    // sun-kissed highlight (upper-right)
+    blob(5, -30, 9, light);
+    blob(11, -23, 8, light);
+    ctx.fillStyle = 'rgba(245,230,150,0.40)';
+    ctx.beginPath();
+    ctx.ellipse(cx + 9 * s, cy - 30 * s, 7 * s, 6 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // World-space scenery in the wild margins around the plot. The camera never
+  // scrolls past 0,0, so showcase props live to the RIGHT and BELOW the plot
+  // (reliably visible) while a forest ring hugs every border.
+  _drawProps(ctx, farm) {
+    const fw = farm.cols * TILE_SIZE, fh = farm.rows * TILE_SIZE;
+    const rx = fw + 56;   // right wild strip
+    const by = fh + 50;   // bottom wild strip
+
+    this._drawForestRing(ctx, farm);
+
+    // Cottage centerpiece + attached shed in the right margin
+    this._drawCottage(ctx, rx + 10, 30);
+    this._drawShed(ctx, rx + 24, 30 + TILE_SIZE * 3.1);
+    this._drawTrough(ctx, rx + 30, 30 + TILE_SIZE * 5.0);
+    this._drawPot(ctx, rx + 4, 30 + TILE_SIZE * 2.5);
+    this._drawSign(ctx, rx + 150, 30 + TILE_SIZE * 4.0);
+
+    // Cosy clutter along the bottom margin
+    this._drawBarrel(ctx, 30, by);
+    this._drawBarrel(ctx, 70, by + 6);
+    this._drawCrate(ctx, 130, by - 2);
+    this._drawLogs(ctx, 210, by + 4);
+    this._drawPot(ctx, 300, by);
+    this._drawFlowerBed(ctx, 360, by - 4, 1);
+    this._drawFlowerBed(ctx, fw * 0.25, by - 4, 2);
+  }
+
+  _drawForestRing(ctx, farm) {
+    const fw = farm.cols * TILE_SIZE, fh = farm.rows * TILE_SIZE;
+    const m = 44; // hug the border so it stays near the viewport
+    const pts = [];
+    for (let x = -m; x <= fw + m; x += 76) { pts.push([x, -m]); pts.push([x + 28, fh + m]); }
+    for (let y = 0; y <= fh; y += 78) { pts.push([-m, y]); pts.push([fw + m, y + 22]); }
+    // Back-to-front so lower trees overlap correctly
+    pts.sort((a, b) => a[1] - b[1]);
+    pts.forEach(([x, y]) => {
+      const seed = (x * 13 + y * 7) | 0;
+      const sc = 0.82 + (Math.abs(seed) % 6) * 0.10;
+      this._drawLeafyTree(ctx, x, y, sc, seed);
+    });
+  }
+
+  _drawCottage(ctx, x, y) {
+    const W = TILE_SIZE * 4.4, H = TILE_SIZE * 2.6;
+    const skin = SKINS.house[0];
+    const wall = PALETTE.plaster, beam = PALETTE.timber;
+
+    // Soft shadow
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath();
+    ctx.ellipse(x + W / 2, y + H + 8, W * 0.56, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Body
+    ctx.fillStyle = wall;
+    ctx.fillRect(x, y, W, H);
+    // Half-timber framing
+    ctx.fillStyle = beam;
+    ctx.fillRect(x, y, W, 6);
+    ctx.fillRect(x, y + H - 6, W, 6);
+    ctx.fillRect(x, y, 6, H);
+    ctx.fillRect(x + W - 6, y, 6, H);
+    ctx.fillRect(x + W / 2 - 3, y, 6, H);
+    // Diagonal braces
+    ctx.strokeStyle = beam;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(x + 8, y + H - 8); ctx.lineTo(x + W / 2 - 8, y + 10);
+    ctx.moveTo(x + W - 8, y + H - 8); ctx.lineTo(x + W / 2 + 8, y + 10);
+    ctx.stroke();
+
+    // Windows (warm-lit)
+    [x + W * 0.20, x + W * 0.70].forEach(wx => {
+      ctx.fillStyle = beam;
+      ctx.fillRect(wx - 2, y + H * 0.34 - 2, 30, 26);
+      ctx.fillStyle = PALETTE.glassWarm;
+      ctx.fillRect(wx, y + H * 0.34, 26, 22);
+      ctx.fillStyle = beam;
+      ctx.fillRect(wx + 12, y + H * 0.34, 2, 22);
+      ctx.fillRect(wx, y + H * 0.34 + 10, 26, 2);
+    });
+    // Door
+    ctx.fillStyle = PALETTE.roofShade;
+    ctx.fillRect(x + W * 0.44, y + H * 0.42, 24, H * 0.58);
+    ctx.fillStyle = PALETTE.timberHi;
+    ctx.fillRect(x + W * 0.44 + 17, y + H * 0.66, 3, 3);
+
+    // Gable shingle roof (overhanging triangle + shingle rows)
+    const rOver = 16, peakY = y - TILE_SIZE * 1.5;
+    ctx.fillStyle = PALETTE.roofShade;
+    ctx.beginPath();
+    ctx.moveTo(x - rOver, y + 4);
+    ctx.lineTo(x + W / 2, peakY);
+    ctx.lineTo(x + W + rOver, y + 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = PALETTE.roof;
+    ctx.beginPath();
+    ctx.moveTo(x - rOver + 4, y + 2);
+    ctx.lineTo(x + W / 2, peakY + 6);
+    ctx.lineTo(x + W + rOver - 4, y + 2);
+    ctx.closePath();
+    ctx.fill();
+    // Shingle scallops
+    ctx.fillStyle = PALETTE.roofHi;
+    for (let row = 0; row < 5; row++) {
+      const ry = peakY + 14 + row * 11;
+      const half = ((ry - peakY) / (y + 4 - peakY)) * (W / 2 + rOver);
+      for (let sx = -half; sx < half; sx += 14) {
+        ctx.beginPath();
+        ctx.arc(x + W / 2 + sx + 7, ry, 6, Math.PI, 0);
+        ctx.fill();
+      }
+    }
+
+    // Stone chimney + smoke
+    const chX = x + W * 0.72, chY = peakY + TILE_SIZE * 0.5;
+    ctx.fillStyle = PALETTE.stone;
+    ctx.fillRect(chX, chY, 18, 34);
+    ctx.fillStyle = PALETTE.stoneHi;
+    ctx.fillRect(chX, chY, 18, 5);
+    const t = (this._timestamp || 0) / 600;
+    ctx.fillStyle = 'rgba(225,225,225,0.5)';
+    for (let i = 0; i < 3; i++) {
+      const pf = (t + i) % 3;
+      ctx.beginPath();
+      ctx.arc(chX + 9 + Math.sin(t + i) * 5, chY - 8 - pf * 14, 5 + pf * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Flower balcony
+    ctx.fillStyle = PALETTE.timberHi;
+    ctx.fillRect(x + W * 0.16, y + H * 0.30, W * 0.68, 7);
+    for (let i = 0; i < 9; i++) {
+      const fx = x + W * 0.18 + i * (W * 0.64 / 8);
+      ctx.fillStyle = '#3a8a2c';
+      ctx.fillRect(fx, y + H * 0.30 - 6, 4, 7);
+      ctx.fillStyle = ['#ff6f8b', '#ffd84a', '#ff9a3c'][i % 3];
+      ctx.beginPath();
+      ctx.arc(fx + 2, y + H * 0.30 - 7, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  _drawShed(ctx, x, y) {
+    const W = TILE_SIZE * 2.2, H = TILE_SIZE * 1.6;
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath();
+    ctx.ellipse(x + W / 2, y + H + 6, W * 0.58, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Plank walls
+    ctx.fillStyle = '#a9763f';
+    ctx.fillRect(x, y, W, H);
+    ctx.strokeStyle = '#8a5c2e';
+    ctx.lineWidth = 2;
+    for (let px = x + 10; px < x + W; px += 12) {
+      ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px, y + H); ctx.stroke();
+    }
+    // Dark interior opening
+    ctx.fillStyle = '#3a2614';
+    ctx.fillRect(x + W * 0.28, y + H * 0.28, W * 0.44, H * 0.72);
+    // Lean-to shingle roof
+    ctx.fillStyle = PALETTE.roofShade;
+    ctx.beginPath();
+    ctx.moveTo(x - 10, y + 6);
+    ctx.lineTo(x + W * 0.5, y - TILE_SIZE * 0.7);
+    ctx.lineTo(x + W + 10, y + 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = PALETTE.roof;
+    ctx.beginPath();
+    ctx.moveTo(x - 6, y + 4);
+    ctx.lineTo(x + W * 0.5, y - TILE_SIZE * 0.7 + 6);
+    ctx.lineTo(x + W + 6, y + 4);
+    ctx.closePath();
+    ctx.fill();
+    // Hay bale at the door
+    ctx.fillStyle = '#e3c645';
+    ctx.fillRect(x + W * 0.04, y + H - 14, 22, 14);
+    ctx.fillStyle = '#c8a824';
+    for (let i = 0; i < 3; i++) ctx.fillRect(x + W * 0.04 + 4 + i * 7, y + H - 12, 2, 11);
+  }
+
+  _drawBarrel(ctx, x, y) {
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath(); ctx.ellipse(x + 14, y + 34, 16, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#9a6a38';
+    ctx.fillRect(x, y, 28, 34);
+    ctx.fillStyle = '#7a4f28';
+    ctx.fillRect(x, y + 6, 28, 4);
+    ctx.fillRect(x, y + 24, 28, 4);
+    ctx.fillStyle = '#b88a52';
+    ctx.fillRect(x + 3, y, 4, 34);
+    // Apples poking out
+    ctx.fillStyle = '#cc3322';
+    ctx.beginPath(); ctx.arc(x + 9, y - 1, 5, 0, Math.PI * 2);
+    ctx.arc(x + 19, y - 2, 5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  _drawCrate(ctx, x, y) {
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath(); ctx.ellipse(x + 16, y + 32, 18, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#b5854a';
+    ctx.fillRect(x, y, 32, 30);
+    ctx.strokeStyle = '#8a6030';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x + 1, y + 1, 30, 28);
+    ctx.beginPath();
+    ctx.moveTo(x + 1, y + 1); ctx.lineTo(x + 31, y + 29);
+    ctx.moveTo(x + 31, y + 1); ctx.lineTo(x + 1, y + 29);
+    ctx.stroke();
+    // Pumpkin on top
+    ctx.fillStyle = '#e87820';
+    ctx.beginPath(); ctx.ellipse(x + 16, y - 4, 11, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5a8020';
+    ctx.fillRect(x + 14, y - 14, 4, 6);
+  }
+
+  _drawLogs(ctx, x, y) {
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath(); ctx.ellipse(x + 22, y + 24, 26, 6, 0, 0, Math.PI * 2); ctx.fill();
+    [[0, 10], [16, 10], [8, 0]].forEach(([dx, dy]) => {
+      ctx.fillStyle = '#7a5230';
+      ctx.fillRect(x + dx, y + dy, 30, 13);
+      ctx.fillStyle = '#caa06a';
+      ctx.beginPath(); ctx.ellipse(x + dx, y + dy + 6, 5, 6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#a07a48';
+      ctx.beginPath(); ctx.arc(x + dx, y + dy + 6, 2, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  _drawTrough(ctx, x, y) {
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath(); ctx.ellipse(x + 24, y + 22, 28, 6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#8a5e34';
+    ctx.fillRect(x, y, 48, 18);
+    ctx.fillStyle = '#5fa9c9';
+    ctx.fillRect(x + 3, y + 3, 42, 8);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillRect(x + 7, y + 4, 14, 2);
+  }
+
+  _drawPot(ctx, x, y) {
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath(); ctx.ellipse(x + 12, y + 26, 14, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#b5673a';
+    ctx.beginPath();
+    ctx.moveTo(x, y + 10); ctx.lineTo(x + 24, y + 10);
+    ctx.lineTo(x + 20, y + 26); ctx.lineTo(x + 4, y + 26);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#caa06a';
+    ctx.fillRect(x - 2, y + 8, 28, 4);
+    // Bushy plant
+    ctx.fillStyle = '#3a8a2c';
+    [[12, 2, 11], [5, 6, 8], [19, 6, 8]].forEach(([dx, dy, r]) => {
+      ctx.beginPath(); ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = '#ffd84a';
+    ctx.beginPath(); ctx.arc(x + 12, y, 3, 0, Math.PI * 2); ctx.fill();
+  }
+
+  _drawSign(ctx, x, y) {
+    ctx.fillStyle = PALETTE.shadow;
+    ctx.beginPath(); ctx.ellipse(x + 8, y + 36, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6b4524';
+    ctx.fillRect(x + 6, y + 6, 5, 32);
+    ctx.fillStyle = '#a9763f';
+    ctx.fillRect(x - 6, y, 30, 18);
+    ctx.fillStyle = '#7a4f28';
+    ctx.fillRect(x - 6, y, 30, 3);
+    ctx.fillStyle = '#5a3a1c';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('FARM', x + 9, y + 13);
+    ctx.textAlign = 'left';
+  }
+
+  _drawFlowerBed(ctx, x, y, seed) {
+    ctx.fillStyle = '#5a3b22';
+    ctx.fillRect(x, y + 18, TILE_SIZE * 1.6, 14);
+    const cols = ['#ff6f8b', '#ffd84a', '#ff9a3c', '#ffffff', '#c46bd6'];
+    for (let i = 0; i < 14; i++) {
+      const r = pr(seed, i, 9);
+      const fx = x + 4 + (r % (TILE_SIZE * 1.5));
+      const fy = y + 8 + ((r >> 6) % 18);
+      ctx.fillStyle = '#3a8a2c';
+      ctx.fillRect(fx, fy + 3, 2, 8);
+      ctx.fillStyle = cols[r % cols.length];
+      ctx.beginPath(); ctx.arc(fx + 1, fy, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff8d8';
+      ctx.beginPath(); ctx.arc(fx + 1, fy, 1.4, 0, Math.PI * 2); ctx.fill();
+    }
   }
 
   _drawFence(ctx, farm) {
@@ -350,16 +761,16 @@ export class Renderer {
 
   _drawGrassTile(ctx, px, py, tx, ty) {
     const h = pr(tx, ty);
-    ctx.fillStyle = '#6db33f';
+    ctx.fillStyle = '#74b542';
     ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
 
     // Top-left highlight
-    ctx.fillStyle = '#7ec948';
+    ctx.fillStyle = '#8ad04e';
     ctx.fillRect(px, py, TILE_SIZE, 5);
     ctx.fillRect(px, py, 5, TILE_SIZE);
 
     // Bottom-right shadow
-    ctx.fillStyle = '#5a9830';
+    ctx.fillStyle = '#5d9a32';
     ctx.fillRect(px, py + TILE_SIZE - 6, TILE_SIZE, 6);
     ctx.fillRect(px + TILE_SIZE - 6, py, 6, TILE_SIZE);
 
@@ -382,15 +793,33 @@ export class Renderer {
       ctx.fillRect(bx + 2, by + 1, 2, 5);
     }
 
-    // Flower (rare)
+    // Small bush (occasional)
+    if ((h >> 12 & 0x7) === 0) {
+      const bx = px + 10 + (h & 0xf), by = py + 14 + ((h >> 4) & 0xf);
+      ctx.fillStyle = '#3a7a26';
+      [[0, 0, 8], [7, 2, 6], [-6, 3, 6]].forEach(([dx, dy, r]) => {
+        ctx.beginPath(); ctx.arc(bx + dx, by + dy, r, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.fillStyle = '#56a635';
+      ctx.beginPath(); ctx.arc(bx - 1, by - 2, 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Flower cluster (rare) — a few blooms together, not lone dots
     if ((h >> 14) < 0x2) {
-      const fx = px + 7 + (h & 0x1f) % (TILE_SIZE - 14);
-      const fy = py + 7 + ((h >> 6) & 0x1f) % (TILE_SIZE - 14);
-      ctx.fillStyle = (h & 0x20) ? '#ffee44' : '#ff88bb';
-      ctx.fillRect(fx - 1, fy, 3, 1); ctx.fillRect(fx, fy - 1, 1, 3);
-      ctx.fillRect(fx, fy, 1, 1);
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(fx, fy, 1, 1);
+      const cx0 = px + 8 + (h & 0x1f) % (TILE_SIZE - 18);
+      const cy0 = py + 8 + ((h >> 6) & 0x1f) % (TILE_SIZE - 18);
+      const cols = ['#ff8fb0', '#ffe24a', '#ffffff', '#ff9a3c'];
+      for (let i = 0; i < 4; i++) {
+        const fr = pr(tx, ty, 20 + i);
+        const fx = cx0 + (fr % 14);
+        const fy = cy0 + ((fr >> 5) % 12);
+        ctx.fillStyle = '#3a8a2c';
+        ctx.fillRect(fx, fy + 2, 1, 4);
+        ctx.fillStyle = cols[fr % cols.length];
+        ctx.beginPath(); ctx.arc(fx, fy, 2.4, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff8d8';
+        ctx.fillRect(fx, fy, 1, 1);
+      }
     }
   }
 
@@ -430,6 +859,14 @@ export class Renderer {
   // ── Crops ────────────────────────────────────────────────────────────────────
 
   _drawCrop(ctx, px, py, crop) {
+    // Soft contact shadow grounds the plant
+    if (crop.stage >= 1) {
+      ctx.fillStyle = 'rgba(0,0,0,0.16)';
+      ctx.beginPath();
+      ctx.ellipse(px + TILE_SIZE / 2, py + TILE_SIZE - 9,
+        9 + crop.stage * 2.5, 4 + crop.stage, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     switch (crop.kind) {
       case 'wheat': case 'golden_wheat': this._drawWheat(ctx, px, py, crop.stage, crop.kind === 'golden_wheat'); break;
       case 'tomato':  this._drawTomato(ctx, px, py, crop.stage); break;
@@ -765,37 +1202,94 @@ export class Renderer {
     const tileH = Math.floor((this.h - 60) / HOME_ROWS);
     const skinDef = SKINS.house.find(s => s.id === (game.houseSkin || 'classic')) || SKINS.house[0];
 
-    // Walls
-    ctx.fillStyle = skinDef.wallColor;
-    ctx.fillRect(0, 0, this.w, HOME_ROWS * tileH);
+    const floorY = (HOME_ROWS - 2) * tileH;
 
-    // Wallpaper pattern
-    ctx.fillStyle = this._darken(skinDef.wallColor, 15);
-    for (let y = 0; y < HOME_ROWS; y++) {
-      for (let x = 0; x < HOME_COLS; x++) {
-        if ((x + y) % 2 === 0) ctx.fillRect(x * tileW + 4, y * tileH + 4, tileW - 8, tileH - 8);
-      }
+    // Plaster wall with a subtle warm wash
+    ctx.fillStyle = skinDef.wallColor;
+    ctx.fillRect(0, 0, this.w, floorY);
+    const ww = ctx.createLinearGradient(0, 0, 0, floorY);
+    ww.addColorStop(0, 'rgba(255,235,190,0.18)');
+    ww.addColorStop(1, 'rgba(90,60,30,0.10)');
+    ctx.fillStyle = ww;
+    ctx.fillRect(0, 0, this.w, floorY);
+
+    // Half-timber framing over the plaster
+    const beam = PALETTE.timber, beamHi = PALETTE.timberHi;
+    const bt = 9;
+    ctx.fillStyle = beam;
+    ctx.fillRect(0, 0, this.w, bt);                       // top plate
+    ctx.fillRect(0, floorY - bt, this.w, bt);             // sill plate
+    for (let x = 0; x <= HOME_COLS; x += 2) {             // vertical studs
+      ctx.fillRect(x * tileW - bt / 2, 0, bt, floorY);
+    }
+    // Diagonal braces in each bay
+    ctx.strokeStyle = beam;
+    ctx.lineWidth = 7;
+    for (let x = 0; x < HOME_COLS; x += 2) {
+      ctx.beginPath();
+      ctx.moveTo(x * tileW + 4, floorY - bt);
+      ctx.lineTo((x + 2) * tileW - 4, bt);
+      ctx.stroke();
+    }
+    ctx.fillStyle = beamHi;
+    for (let x = 0; x <= HOME_COLS; x += 2) ctx.fillRect(x * tileW - bt / 2, 0, 2, floorY);
+
+    // Window with a little forest view
+    const winX = tileW * 0.6, winY = bt + 14, winW = tileW * 1.5, winH = floorY - bt - 40;
+    ctx.fillStyle = beam;
+    ctx.fillRect(winX - 6, winY - 6, winW + 12, winH + 12);
+    const sky = ctx.createLinearGradient(0, winY, 0, winY + winH);
+    sky.addColorStop(0, '#9fd0e8');
+    sky.addColorStop(1, '#dfeccb');
+    ctx.fillStyle = sky;
+    ctx.fillRect(winX, winY, winW, winH);
+    ctx.fillStyle = '#3f7a30';
+    [[winX + winW * 0.28, 14], [winX + winW * 0.62, 18], [winX + winW * 0.85, 12]].forEach(([bx, r]) => {
+      ctx.beginPath(); ctx.arc(bx, winY + winH - 4, r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = beam;
+    ctx.fillRect(winX + winW / 2 - 2, winY, 4, winH);
+    ctx.fillRect(winX, winY + winH / 2 - 2, winW, 4);
+
+    // Hanging pot plants
+    for (const hx of [tileW * 4.4, tileW * 6.2]) {
+      ctx.strokeStyle = '#5a4022'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(hx, bt); ctx.lineTo(hx, bt + 22); ctx.stroke();
+      ctx.fillStyle = '#b5673a';
+      ctx.fillRect(hx - 9, bt + 22, 18, 10);
+      ctx.fillStyle = '#3a8a2c';
+      [[-7, 30, 6], [7, 30, 6], [0, 34, 7], [-3, 26, 5]].forEach(([dx, dy, r]) => {
+        ctx.beginPath(); ctx.arc(hx + dx, bt + dy, r, 0, Math.PI * 2); ctx.fill();
+      });
     }
 
-    // Floor (bottom 2 rows feel like floor vs wall)
-    const floorY = (HOME_ROWS - 2) * tileH;
-    ctx.fillStyle = '#c8a870';
+    // Wood-plank floor with grain
+    ctx.fillStyle = '#c79a5e';
     ctx.fillRect(0, floorY, this.w, HOME_ROWS * tileH - floorY);
-    // Floorboard lines
-    ctx.strokeStyle = this._darken('#c8a870', 20);
+    const fg = ctx.createLinearGradient(0, floorY, 0, HOME_ROWS * tileH);
+    fg.addColorStop(0, 'rgba(255,225,170,0.16)');
+    fg.addColorStop(1, 'rgba(70,45,20,0.16)');
+    ctx.fillStyle = fg;
+    ctx.fillRect(0, floorY, this.w, HOME_ROWS * tileH - floorY);
+    ctx.strokeStyle = 'rgba(90,60,28,0.5)';
     ctx.lineWidth = 1;
-    for (let x = 0; x < HOME_COLS; x++) {
+    for (let x = 0; x <= HOME_COLS; x++) {
       ctx.beginPath(); ctx.moveTo(x * tileW, floorY); ctx.lineTo(x * tileW, HOME_ROWS * tileH); ctx.stroke();
     }
+    ctx.strokeStyle = 'rgba(150,110,60,0.4)';
+    for (let i = 0; i < 22; i++) {
+      const gx = (i * 97) % this.w, gy = floorY + 6 + (i * 53) % (HOME_ROWS * tileH - floorY - 8);
+      ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(gx + 22, gy); ctx.stroke();
+    }
 
-    // Grid
-    ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.lineWidth = 1;
+    // Grid (placement aid)
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
     for (let y = 0; y <= HOME_ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * tileH); ctx.lineTo(HOME_COLS * tileW, y * tileH); ctx.stroke(); }
     for (let x = 0; x <= HOME_COLS; x++) { ctx.beginPath(); ctx.moveTo(x * tileW, 0); ctx.lineTo(x * tileW, HOME_ROWS * tileH); ctx.stroke(); }
 
-    // Baseboards
-    ctx.fillStyle = this._darken(skinDef.wallColor, 30);
-    ctx.fillRect(0, floorY - 6, this.w, 6);
+    // Baseboard
+    ctx.fillStyle = this._darken(skinDef.wallColor, 34);
+    ctx.fillRect(0, floorY - 5, this.w, 5);
 
     // Furniture
     game.homeLayout.forEach(item => {
@@ -820,17 +1314,23 @@ export class Renderer {
       ctx.textAlign = 'left';
     });
 
-    // Roof bar
+    // Shingled roof bar
+    const ry = HOME_ROWS * tileH;
+    ctx.fillStyle = this._darken(skinDef.roofColor, 18);
+    ctx.fillRect(0, ry, this.w, 18);
     ctx.fillStyle = skinDef.roofColor;
-    ctx.fillRect(0, HOME_ROWS * tileH, this.w, 14);
-    ctx.fillStyle = this._lighten(skinDef.roofColor, 20);
-    ctx.fillRect(0, HOME_ROWS * tileH, this.w, 3);
+    for (let sx = -7; sx < this.w; sx += 16) {
+      ctx.beginPath(); ctx.arc(sx + 8, ry + 13, 9, Math.PI, 0); ctx.fill();
+    }
+    ctx.fillStyle = this._lighten(skinDef.roofColor, 28);
+    ctx.fillRect(0, ry, this.w, 3);
   }
 
   // ── Season / Weather Overlays ─────────────────────────────────────────────
 
   _drawSeasonOverlay(ctx, season) {
-    const tints = [null, 'rgba(255,220,100,0.06)', 'rgba(255,140,40,0.10)', 'rgba(100,140,220,0.12)'];
+    // Gentler than before — warmth/vignette layer adds the rest of the mood
+    const tints = [null, 'rgba(255,225,120,0.04)', 'rgba(255,150,50,0.07)', 'rgba(120,160,220,0.09)'];
     const tint = tints[season];
     if (!tint) return;
     ctx.fillStyle = tint;
@@ -907,23 +1407,31 @@ export class Renderer {
   _renderBarn(game) {
     const { ctx } = this;
 
-    // Background
-    ctx.fillStyle = '#c8a060';
+    // Timber-plank wall with a warm wash
+    ctx.fillStyle = '#b5854a';
     ctx.fillRect(0, 0, this.w, this.h);
-
-    // Barn wood wall texture
-    ctx.fillStyle = '#a07040';
-    for (let i = 0; i < Math.ceil(this.h / 30); i++) {
-      ctx.fillRect(0, i * 30, this.w, 2);
+    const bw = ctx.createLinearGradient(0, 0, 0, this.h);
+    bw.addColorStop(0, 'rgba(255,225,160,0.12)');
+    bw.addColorStop(1, 'rgba(70,45,20,0.20)');
+    ctx.fillStyle = bw;
+    ctx.fillRect(0, 0, this.w, this.h);
+    ctx.strokeStyle = 'rgba(110,74,38,0.55)';
+    ctx.lineWidth = 2;
+    for (let x = 24; x < this.w; x += 26) {
+      ctx.beginPath(); ctx.moveTo(x, 22); ctx.lineTo(x, this.h); ctx.stroke();
     }
 
-    // Roof bar
+    // Shingled roof + red trim accent
+    ctx.fillStyle = PALETTE.roofShade;
+    ctx.fillRect(0, 0, this.w, 26);
+    ctx.fillStyle = PALETTE.roof;
+    for (let sx = -8; sx < this.w; sx += 18) {
+      ctx.beginPath(); ctx.arc(sx + 9, 20, 11, Math.PI, 0); ctx.fill();
+    }
     ctx.fillStyle = '#8B2020';
-    ctx.fillRect(0, 0, this.w, 22);
-    ctx.fillStyle = '#aa3030';
-    ctx.fillRect(0, 0, this.w, 4);
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fillRect(0, 0, this.w, 2);
+    ctx.fillRect(0, 24, this.w, 4);
+    ctx.fillStyle = this._lighten(PALETTE.roof, 26);
+    ctx.fillRect(0, 0, this.w, 3);
 
     // Title
     ctx.fillStyle = '#fff';
@@ -958,24 +1466,38 @@ export class Renderer {
   _drawAnimalStall(ctx, sx, sy, sw, sh, animal) {
     const def = ANIMALS[animal.kind];
 
-    // Stall floor
-    ctx.fillStyle = '#d4b060';
+    // Stall floor (warm wood + plank seams)
+    ctx.fillStyle = '#d8b566';
     ctx.fillRect(sx + 4, sy, sw - 8, sh);
-    // Stall walls (darker sides)
-    ctx.fillStyle = '#a07840';
-    ctx.fillRect(sx + 4, sy, 6, sh);
-    ctx.fillRect(sx + sw - 10, sy, 6, sh);
-    ctx.fillRect(sx + 4, sy, sw - 8, 6);
+    ctx.strokeStyle = 'rgba(120,82,40,0.4)';
+    ctx.lineWidth = 1;
+    for (let py = sy + 14; py < sy + sh; py += 16) {
+      ctx.beginPath(); ctx.moveTo(sx + 6, py); ctx.lineTo(sx + sw - 6, py); ctx.stroke();
+    }
+    // Soft inner shadow for depth
+    ctx.fillStyle = 'rgba(60,38,16,0.16)';
+    ctx.fillRect(sx + 4, sy, sw - 8, 10);
+    // Wooden post framing
+    ctx.fillStyle = '#8a5c2e';
+    ctx.fillRect(sx + 4, sy, 7, sh);
+    ctx.fillRect(sx + sw - 11, sy, 7, sh);
+    ctx.fillRect(sx + 4, sy, sw - 8, 7);
+    ctx.fillStyle = '#a9763f';
+    ctx.fillRect(sx + 4, sy, 2, sh);
+    ctx.fillRect(sx + sw - 11, sy, 2, sh);
 
-    // Hay
+    // Hay pile
     ctx.fillStyle = '#e8c840';
-    ctx.fillRect(sx + sw / 2 - 16, sy + sh - 24, 32, 12);
-    ctx.fillStyle = '#c8a820';
-    for (let i = 0; i < 4; i++) ctx.fillRect(sx + sw / 2 - 14 + i * 8, sy + sh - 22, 2, 10);
+    [[-16, 2, 32, 12], [-10, -4, 20, 8]].forEach(([dx, dy, w, hh]) =>
+      ctx.fillRect(sx + sw / 2 + dx, sy + sh - 24 + dy, w, hh));
+    ctx.fillStyle = '#caa830';
+    for (let i = 0; i < 5; i++) ctx.fillRect(sx + sw / 2 - 14 + i * 7, sy + sh - 22, 2, 11);
 
-    // Animal sprite
+    // Animal sprite (with grounding shadow)
     const cx = sx + sw / 2;
     const cy = sy + sh / 2 - 10;
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + 30, 26, 7, 0, 0, Math.PI * 2); ctx.fill();
     this._drawAnimalSprite(ctx, cx, cy, animal.kind, def.color);
 
     // Fed indicator
