@@ -1,4 +1,4 @@
-import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE, BUILDINGS, ANIMAL_PEN } from './constants.js';
+import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE, BUILDINGS } from './constants.js';
 
 // Deterministic pseudo-random per tile position
 function pr(x, y, s = 0) {
@@ -265,12 +265,11 @@ export class Renderer {
   }
 
   _drawWildPond(ctx, farm) {
-    // Fixed world position: left of the fence, mid-height of the farm.
-    // Centered visually so the player can walk over and fish.
-    const pondCX = -5 * TILE_SIZE + TILE_SIZE * 2;     // world px center X
-    const pondCY = Math.floor(farm.rows / 2) * TILE_SIZE; // world px center Y
+    // Pond sits on the RIGHT side, just below the player's barn (shed) so
+    // all of your "stuff" (home, pen, barn, pond) clusters together.
+    const pondCX = (farm.cols + 4) * TILE_SIZE;
+    const pondCY = (farm.rows + 1) * TILE_SIZE;
     this._drawPond(ctx, pondCX, pondCY);
-    // Click hit-box (world coords; isPondClick converts back to screen)
     this._pondW = TILE_SIZE * 4;
     this._pondH = TILE_SIZE * 2.5;
     this._pondScreenX = pondCX - this._pondW / 2;
@@ -400,12 +399,14 @@ export class Renderer {
 
     this._drawForestRing(ctx, farm);
 
-    // Cottage centerpiece + attached shed in the right margin
+    // Cottage = player's HOME (top of the right-side cluster).
+    // Shed   = player's BARN (bottom). A 2-tile gap between them holds
+    // the animal pen (drawn in _drawBuildings).
     this._drawCottage(ctx, rx + 10, 30);
-    this._drawShed(ctx, rx + 24, 30 + TILE_SIZE * 3.1);
-    this._drawTrough(ctx, rx + 30, 30 + TILE_SIZE * 5.0);
+    this._drawShed(ctx, rx + 24, 30 + TILE_SIZE * 6.0);
+    this._drawTrough(ctx, rx + 30, 30 + TILE_SIZE * 8.0);
     this._drawPot(ctx, rx + 4, 30 + TILE_SIZE * 2.5);
-    this._drawSign(ctx, rx + 150, 30 + TILE_SIZE * 4.0);
+    this._drawSign(ctx, rx + 150, 30 + TILE_SIZE * 9.0);
 
     // Cosy clutter along the bottom margin
     this._drawBarrel(ctx, 30, by);
@@ -1275,9 +1276,46 @@ export class Renderer {
       this._drawBuildingSignAndNpc(ctx, b, game);
     }
     this._drawAnimalPen(ctx, game);
+    this._drawHotspotPrompts(ctx, game);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.lineWidth = 1;
+  }
+
+  // Show a "🏠 Enter" prompt over the cottage / shed doors when player is near.
+  // Also records a click hit-zone so tapping the cottage opens Home, etc.
+  _drawHotspotPrompts(ctx, game) {
+    const { gridX, gridY } = game.player;
+    const hotspots = [
+      { ...game.homeHotspot, icon: '🏠' },
+      { ...game.barnHotspot, icon: '🚜' },
+    ];
+    this._hotspotRects = [];
+    for (const h of hotspots) {
+      const wx = h.tx * TILE_SIZE + TILE_SIZE / 2;
+      const wy = h.ty * TILE_SIZE + TILE_SIZE / 2;
+      const near = Math.max(Math.abs(gridX - h.tx), Math.abs(gridY - h.ty)) <= 1;
+      this._hotspotRects.push({
+        action: h.action,
+        label: h.label,
+        isHotspot: true,
+        sx: (h.tx * TILE_SIZE) - game.farm.camX,
+        sy: (h.ty * TILE_SIZE) - game.farm.camY,
+        sw: TILE_SIZE,
+        sh: TILE_SIZE,
+      });
+      if (near) {
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+        ctx.lineWidth = 4;
+        ctx.font = 'bold 13px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        const msg = `${h.icon} Enter ${h.label}`;
+        ctx.strokeText(msg, wx, wy - 14);
+        ctx.fillText(msg, wx, wy - 14);
+      }
+    }
   }
 
   // ── Village dirt path ──────────────────────────────────────────────────────
@@ -1286,7 +1324,7 @@ export class Renderer {
     // Wide horizontal dirt strip in front of all buildings (world tiles y=-1).
     // Connects the leftmost building (Market x=-6) to the rightmost (Quests x=12+1).
     const x0 = -7 * TILE_SIZE;
-    const x1 = 14 * TILE_SIZE;
+    const x1 = 8 * TILE_SIZE;
     const y0 = -1 * TILE_SIZE - 4;
     const ph = 28;
     ctx.fillStyle = '#a07848';
@@ -1801,7 +1839,7 @@ export class Renderer {
   // ── Animal Pen + animals ───────────────────────────────────────────────────
 
   _drawAnimalPen(ctx, game) {
-    const p = ANIMAL_PEN;
+    const p = game.animalPenBounds;
     const px = p.x * TILE_SIZE, py = p.y * TILE_SIZE;
     const pw = p.w * TILE_SIZE, ph = p.h * TILE_SIZE;
 
@@ -2090,14 +2128,15 @@ export class Renderer {
     ctx.restore();
   }
 
-  // Returns the NPC under a screen point (for tap-to-talk), or null.
+  // Returns the NPC or hotspot under a screen point (for tap-to-interact), or null.
   npcAt(screenX, screenY) {
-    if (!this._npcRects) return null;
-    for (const r of this._npcRects) {
-      if (screenX >= r.sx && screenX <= r.sx + r.sw &&
-          screenY >= r.sy && screenY <= r.sy + r.sh) {
-        return r;
-      }
+    const inRect = (r) => screenX >= r.sx && screenX <= r.sx + r.sw &&
+                          screenY >= r.sy && screenY <= r.sy + r.sh;
+    if (this._npcRects) {
+      for (const r of this._npcRects) if (inRect(r)) return r;
+    }
+    if (this._hotspotRects) {
+      for (const r of this._hotspotRects) if (inRect(r)) return r;
     }
     return null;
   }
@@ -2274,33 +2313,171 @@ export class Renderer {
 
   _drawPond(ctx, cx, cy) {
     const rx = TILE_SIZE * 2, ry = TILE_SIZE * 1.2;
+    const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.001;
 
-    // Water
-    ctx.fillStyle = '#2a6080';
+    // Soft ground shadow under the pond
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + ry + 4, rx + 10, 8, 0, 0, Math.PI * 2); ctx.fill();
+
+    // ── Sandy / muddy shore (wide, darker ring around the water) ───────────
+    ctx.fillStyle = '#a78550';
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx + 16, ry + 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#8b6a3a';
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx + 10, ry + 6, 0, 0, Math.PI * 2); ctx.fill();
+    // Pebbles around the shore
+    ctx.fillStyle = '#5a4a3a';
+    for (let i = 0; i < 20; i++) {
+      const ang = (i / 20) * Math.PI * 2;
+      const dx = Math.cos(ang) * (rx + 10 + (i % 3));
+      const dy = Math.sin(ang) * (ry + 7 + ((i * 7) % 3));
+      ctx.fillRect(cx + dx | 0, cy + dy | 0, 2, 2);
+    }
+    ctx.fillStyle = '#8a7560';
+    for (let i = 0; i < 12; i++) {
+      const ang = (i / 12) * Math.PI * 2 + 0.2;
+      const dx = Math.cos(ang) * (rx + 13);
+      const dy = Math.sin(ang) * (ry + 10);
+      ctx.fillRect((cx + dx) | 0, (cy + dy) | 0, 3, 2);
+    }
+
+    // ── Water (radial gradient for depth) ──────────────────────────────────
+    const grad = ctx.createRadialGradient(cx - rx * 0.3, cy - ry * 0.3, 4, cx, cy, rx);
+    grad.addColorStop(0, '#5fb0d4');
+    grad.addColorStop(0.55, '#3a82b8');
+    grad.addColorStop(1, '#1c4870');
+    ctx.fillStyle = grad;
     ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
 
-    // Shimmer
-    ctx.fillStyle = 'rgba(100,200,255,0.3)';
-    ctx.beginPath(); ctx.ellipse(cx - rx * 0.2, cy - ry * 0.3, rx * 0.4, ry * 0.25, -0.3, 0, Math.PI * 2); ctx.fill();
+    // Darker shore edge inside the water
+    ctx.fillStyle = 'rgba(15,40,70,0.55)';
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy, rx - 5, ry - 4, 0, 0, Math.PI * 2);
+    ctx.fill('evenodd');
 
-    // Lily pads
-    ctx.fillStyle = '#2a7820';
-    [[cx - 20, cy + 10], [cx + 30, cy - 10], [cx + 5, cy + 22]].forEach(([lx, ly]) => {
-      ctx.beginPath(); ctx.ellipse(lx, ly, 10, 7, 0.5, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#3aaa28'; ctx.fillRect(lx - 1, ly - 7, 2, 7); ctx.fillStyle = '#2a7820';
+    // ── Animated ripples (concentric expanding rings) ──────────────────────
+    for (let r = 0; r < 3; r++) {
+      const phase = (t * 0.5 + r * 0.4) % 1.5;
+      if (phase > 1) continue;
+      const rad = phase * (rx - 8);
+      ctx.strokeStyle = `rgba(200,235,255,${(0.45 - phase * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(cx + Math.sin(r * 1.7) * 6, cy + Math.cos(r * 1.3) * 4, rad, rad * 0.6, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Shimmer highlights (top-left specular)
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.beginPath(); ctx.ellipse(cx - rx * 0.3, cy - ry * 0.4, rx * 0.35, ry * 0.16, -0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.30)';
+    ctx.beginPath(); ctx.ellipse(cx - rx * 0.05, cy - ry * 0.5, rx * 0.18, ry * 0.08, -0.2, 0, Math.PI * 2); ctx.fill();
+
+    // Sparkles
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    const sparkles = [[-0.4, -0.2], [0.3, 0.1], [-0.1, 0.35], [0.45, -0.3]];
+    sparkles.forEach(([dx, dy], i) => {
+      const flick = Math.sin(t * 3 + i * 1.4) > 0.4 ? 1 : 0;
+      if (flick) ctx.fillRect((cx + dx * rx) | 0, (cy + dy * ry) | 0, 2, 2);
     });
 
-    // Shore edge
-    ctx.strokeStyle = '#4a8040';
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    // ── Lily pads with flowers ──────────────────────────────────────────────
+    const pads = [[-26, 14, 0.5], [34, -6, -0.3], [-2, 28, 0.2], [22, 24, 0.7]];
+    pads.forEach(([lx, ly, rot]) => {
+      const px = cx + lx, py = cy + ly;
+      // Pad shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      ctx.beginPath(); ctx.ellipse(px + 1, py + 1, 11, 7, rot, 0, Math.PI * 2); ctx.fill();
+      // Pad body
+      ctx.fillStyle = '#2f7a26';
+      ctx.beginPath(); ctx.ellipse(px, py, 11, 7, rot, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3faa30';
+      ctx.beginPath(); ctx.ellipse(px - 2, py - 2, 8, 5, rot, 0, Math.PI * 2); ctx.fill();
+      // Notch (V cut)
+      ctx.fillStyle = '#1c4870';
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px + Math.cos(rot) * 11, py + Math.sin(rot) * 11);
+      ctx.lineTo(px + Math.cos(rot + 0.6) * 11, py + Math.sin(rot + 0.6) * 11);
+      ctx.closePath();
+      ctx.fill();
+    });
+    // Pink flower on one pad
+    ctx.fillStyle = '#ff8fb0';
+    ctx.beginPath(); ctx.arc(cx - 28, cy + 11, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffeb6a';
+    ctx.fillRect((cx - 28) | 0, (cy + 11) | 0, 1, 1);
 
-    // Label
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.font = 'bold 11px monospace';
+    // ── Reeds / cattails at the shore edges ─────────────────────────────────
+    const reedSpots = [[-rx + 6, -ry * 0.2], [-rx + 14, ry * 0.4], [rx - 8, -ry * 0.5], [rx - 16, ry * 0.5], [-4, -ry + 4]];
+    reedSpots.forEach(([dx, dy], i) => {
+      const rxp = cx + dx, ryp = cy + dy;
+      const sway = Math.sin(t * 1.5 + i) * 1.5;
+      // Stem
+      ctx.fillStyle = '#3a7820';
+      ctx.fillRect(rxp | 0, ryp - 18 | 0, 2, 20);
+      ctx.fillRect((rxp + 3 + sway) | 0, ryp - 14 | 0, 2, 16);
+      // Cattail head (brown nub)
+      ctx.fillStyle = '#5a3a1a';
+      ctx.fillRect(rxp | 0, ryp - 22 | 0, 3, 6);
+      ctx.fillRect((rxp + 3 + sway) | 0, ryp - 18 | 0, 3, 5);
+      // Highlight
+      ctx.fillStyle = '#7a4a26';
+      ctx.fillRect(rxp | 0, ryp - 22 | 0, 1, 4);
+    });
+
+    // ── Small wooden dock on the south-west shore ──────────────────────────
+    const dockX = cx - rx + 6, dockY = cy + ry * 0.3;
+    const dockW = 28, dockH = 12;
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.fillRect(dockX, dockY + dockH, dockW, 3);
+    // Planks
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(dockX, dockY, dockW, dockH);
+    ctx.fillStyle = PALETTE.timberHi;
+    for (let p = 0; p < 4; p++) ctx.fillRect(dockX + 2, dockY + 1 + p * 3, dockW - 4, 1);
+    // Posts (front corners)
+    ctx.fillStyle = '#3a2410';
+    ctx.fillRect(dockX - 1, dockY + dockH - 2, 3, 6);
+    ctx.fillRect(dockX + dockW - 2, dockY + dockH - 2, 3, 6);
+
+    // ── Occasional jumping fish (splash arc) ───────────────────────────────
+    const fishPhase = (t * 0.4) % 4;
+    if (fishPhase < 0.6) {
+      const fx = cx + Math.sin(t * 0.2) * rx * 0.4;
+      const arcT = fishPhase / 0.6; // 0..1
+      const fy = cy - Math.sin(arcT * Math.PI) * 14;
+      // Fish silhouette
+      ctx.fillStyle = '#9ec0d8';
+      ctx.beginPath();
+      ctx.ellipse(fx, fy, 5, 2.5, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      // Tail
+      ctx.beginPath();
+      ctx.moveTo(fx - 5, fy);
+      ctx.lineTo(fx - 9, fy - 3);
+      ctx.lineTo(fx - 9, fy + 3);
+      ctx.closePath();
+      ctx.fill();
+      // Splash ring at landing
+      if (arcT > 0.7) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.ellipse(fx, cy, 8 * (arcT - 0.7) / 0.3, 3 * (arcT - 0.7) / 0.3, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // ── Label ───────────────────────────────────────────────────────────────
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+    ctx.lineWidth = 3;
+    ctx.font = 'bold 12px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('🎣 Fishing', cx, cy + ry + 14);
+    ctx.strokeText('🎣 Fishing', cx, cy + ry + 22);
+    ctx.fillText('🎣 Fishing', cx, cy + ry + 22);
     ctx.textAlign = 'left';
+    ctx.lineWidth = 1;
   }
 
   isPondClick(screenX, screenY, farm) {

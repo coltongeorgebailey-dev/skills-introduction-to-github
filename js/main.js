@@ -159,13 +159,22 @@ function findNearbyNpc() {
       return { action: b.action, name: n.name, lines: n.lines || [n.line] };
     }
   }
+  // Home and Barn hotspots — no NPC, the player walks up to their own door.
+  for (const h of [game.homeHotspot, game.barnHotspot]) {
+    if (Math.max(Math.abs(gridX - h.tx), Math.abs(gridY - h.ty)) <= 1) {
+      return { action: h.action, label: h.label, isHotspot: true };
+    }
+  }
   return null;
 }
 
 function interactWith(npc) {
-  const lines = npc.lines || (npc.line ? [npc.line] : ['Hello!']);
-  const line = lines[Math.floor(Math.random() * lines.length)];
-  ui.notify(`${npc.name}: ${line}`, 2600);
+  // Hotspots (own home/barn) skip the dialogue line — you just enter your own place.
+  if (!npc.isHotspot) {
+    const lines = npc.lines || (npc.line ? [npc.line] : ['Hello!']);
+    const line = lines[Math.floor(Math.random() * lines.length)];
+    ui.notify(`${npc.name}: ${line}`, 2600);
+  }
   const a = npc.action;
   if (a === 'market') openShopModal();
   else if (a === 'upgrades') openProgressionModal();
@@ -206,10 +215,17 @@ function handleCanvasClick(screenX, screenY) {
   const tappedNpc = renderer.npcAt(screenX, screenY);
   if (tappedNpc) {
     const n = game.player;
-    const close = BUILDINGS.some(b => b.action === tappedNpc.action &&
-      Math.max(Math.abs(n.gridX - b.npc.x), Math.abs(n.gridY - b.npc.y)) <= 1);
+    let close;
+    if (tappedNpc.isHotspot) {
+      const h = tappedNpc.action === 'home' ? game.homeHotspot : game.barnHotspot;
+      close = Math.max(Math.abs(n.gridX - h.tx), Math.abs(n.gridY - h.ty)) <= 1;
+    } else {
+      close = BUILDINGS.some(b => b.action === tappedNpc.action &&
+        Math.max(Math.abs(n.gridX - b.npc.x), Math.abs(n.gridY - b.npc.y)) <= 1);
+    }
     if (close) { interactWith(tappedNpc); return; }
-    ui.notify(`Walk closer to talk to the ${tappedNpc.name}.`);
+    const who = tappedNpc.isHotspot ? `your ${tappedNpc.label}` : `the ${tappedNpc.name}`;
+    ui.notify(`Walk closer to enter ${who}.`);
     return;
   }
 

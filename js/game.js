@@ -6,7 +6,7 @@ import {
   FISH,
   QUESTS,
   DAY_MS, OFFLINE_DAY_CAP,
-  WORLD_PAD, BUILDINGS, ANIMAL_PEN,
+  WORLD_PAD, BUILDINGS,
   STARTING_ENERGY, MAX_ENERGY,
   SEASON_CROP_PRICES,
 } from './constants.js';
@@ -88,13 +88,29 @@ export class Game {
     };
   }
 
+  // The player's own Home + Barn (drawn as the cottage/shed on the right
+  // side via _drawProps). Coords are world tiles. No NPC — the player just
+  // walks up to the door and presses Enter. The pen sits between them.
+  get homeHotspot() {
+    // Cottage door is roughly at world tile (farm.cols + 3, 3).
+    return { tx: this.farm.cols + 3, ty: 3, w: 1, h: 1, action: 'home', label: 'Home' };
+  }
+  get barnHotspot() {
+    // Shed door (moved down so the pen can sit between cottage and shed).
+    return { tx: this.farm.cols + 2, ty: 7, w: 1, h: 1, action: 'barn', label: 'Barn' };
+  }
+  get animalPenBounds() {
+    // 2×2 fenced yard between cottage (y=0..3) and shed (y=6..8).
+    return { x: this.farm.cols + 1, y: 4, w: 2, h: 2 };
+  }
+
   // True if (tx,ty) is inside any building footprint or the animal pen
-  // (both non-walkable).
+  // (all non-walkable).
   isBlockedTile(tx, ty) {
     for (const b of BUILDINGS) {
       if (tx >= b.x && tx < b.x + b.w && ty >= b.y && ty < b.y + b.h) return true;
     }
-    const p = ANIMAL_PEN;
+    const p = this.animalPenBounds;
     if (tx >= p.x && tx < p.x + p.w && ty >= p.y && ty < p.y + p.h) return true;
     return false;
   }

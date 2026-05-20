@@ -7,6 +7,10 @@ export const WORLD_PAD = 7;
 // the NPC (stationed one tile below the building's door) and talks to enter.
 // Footprint = tiles [x .. x+w-1] x [y .. y+h-1]; coords are world tiles
 // (negative / beyond farm cols-rows = outside the fence).
+// Shops/services — these are TOWN buildings staffed by NPCs the player talks to.
+// The player's own Home and Barn live on the RIGHT side of the farm (drawn via
+// _drawCottage / _drawShed in _drawProps) and have no NPC — see Game.homeHotspot
+// and Game.barnHotspot for their interaction zones.
 export const BUILDINGS = [
   { id: 'market',   action: 'market',   icon: '🛒', label: 'Market',   color: '#c98a3a', x: -6, y: -4, w: 2, h: 2,
     npc: { x: -6, y: -2, name: 'Shopkeep', lines: [
@@ -16,56 +20,35 @@ export const BUILDINGS = [
       'Heard stormy weather gives a bonus yield?',
       'Crafted goods fetch more than raw crops!',
     ]}},
-  { id: 'barn',     action: 'barn',     icon: '🐄', label: 'Barn',     color: '#a44030', x: -3, y: -4, w: 2, h: 2,
-    npc: { x: -3, y: -2, name: 'Rancher', lines: [
-      'Don\'t forget to feed your animals every day!',
-      'A happy cow gives the richest milk.',
-      'Wool season\'s coming — shear those sheep!',
-      'A fed animal is a productive animal.',
-    ]}},
-  { id: 'home',     action: 'home',     icon: '🏠', label: 'Home',     color: '#dcc090', x:  0, y: -4, w: 2, h: 2,
-    npc: { x:  0, y: -2, name: 'Neighbor', lines: [
-      'Home sweet home — decorate however you like!',
-      'A fireplace really warms the place up.',
-      'Nothing beats a cozy farmhouse after a long day.',
-      'Have you tried the rustic wallpaper yet?',
-    ]}},
-  { id: 'upgrades', action: 'upgrades', icon: '⭐', label: 'Upgrades', color: '#6a8fc9', x:  3, y: -4, w: 2, h: 2,
-    npc: { x:  3, y: -2, name: 'Engineer', lines: [
+  { id: 'upgrades', action: 'upgrades', icon: '⭐', label: 'Upgrades', color: '#6a8fc9', x: -3, y: -4, w: 2, h: 2,
+    npc: { x: -3, y: -2, name: 'Engineer', lines: [
       'Better tools mean less work, more harvest!',
       'The Auto-Drip system changed everything for me.',
       'The Tractor can till six tiles in one pass!',
       'Save up — the Tier 3 upgrades are worth every coin.',
     ]}},
-  { id: 'skins',    action: 'skins',    icon: '🎨', label: 'Skins',    color: '#b06ac9', x:  6, y: -4, w: 2, h: 2,
-    npc: { x:  6, y: -2, name: 'Tailor', lines: [
+  { id: 'skins',    action: 'skins',    icon: '🎨', label: 'Skins',    color: '#b06ac9', x:  0, y: -4, w: 2, h: 2,
+    npc: { x:  0, y: -2, name: 'Tailor', lines: [
       'Fancy a fresh new look?',
       'The Space Farmer suit is my personal favourite.',
       'Style matters even on the farm!',
       'New fabrics just in from the city!',
     ]}},
-  { id: 'gems',     action: 'gems',     icon: '💎', label: 'Gems',     color: '#3aa0c9', x:  9, y: -4, w: 2, h: 2,
-    npc: { x:  9, y: -2, name: 'Jeweler', lines: [
+  { id: 'gems',     action: 'gems',     icon: '💎', label: 'Gems',     color: '#3aa0c9', x:  3, y: -4, w: 2, h: 2,
+    npc: { x:  3, y: -2, name: 'Jeweler', lines: [
       'Gems — shiny, rare, and powerful!',
       'You earn a gem every day you log in.',
       'Golden Wheat seeds are only available for gems.',
       'Gems can speed up any farm expansion.',
     ]}},
-  { id: 'quests',   action: 'quests',   icon: '📜', label: 'Quests',   color: '#c9b03a', x: 12, y: -4, w: 2, h: 2,
-    npc: { x: 12, y: -2, name: 'Mayor', lines: [
+  { id: 'quests',   action: 'quests',   icon: '📜', label: 'Quests',   color: '#c9b03a', x:  6, y: -4, w: 2, h: 2,
+    npc: { x:  6, y: -2, name: 'Mayor', lines: [
       'The town needs your help — check the board!',
       'Complete quests to earn coins and gems.',
       'A true Farm Legend reaches Day 100!',
       'Word is someone caught a Golden Fish recently...',
     ]}},
 ];
-
-// Fenced animal yard adjacent to the Barn. Animals the player owns appear here
-// and wander visibly so the farm feels alive without entering a menu.
-// Coords are world tiles (same space as BUILDINGS); footprint = w×h tiles.
-export const ANIMAL_PEN = {
-  x: -2, y: -2, w: 2, h: 2,
-};
 
 export const FARM_SIZES = [
   { id: 1, cols: 10, rows: 8,  name: 'Starter Plot', coinCost: 0,     gemCost: 0   },
