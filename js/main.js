@@ -252,6 +252,14 @@ function _tileScreenCenter(tx, ty) {
 function useTool(tx, ty) {
   const { player, farm } = game;
 
+  // Adjacency check — you must be standing on, or within 1 tile of, the target.
+  // Chebyshev distance ≤ 1 means the 8 surrounding tiles + the tile you stand on.
+  const adx = Math.abs(tx - player.gridX), ady = Math.abs(ty - player.gridY);
+  if (Math.max(adx, ady) > 1) {
+    ui.notify('Move closer to do that here.');
+    return;
+  }
+
   // Energy check — each tool use costs 1 energy
   if (game.energy <= 0) {
     ui.notify('⚡ Out of energy! Sleep to restore it.');

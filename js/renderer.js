@@ -265,10 +265,10 @@ export class Renderer {
   }
 
   _drawWildPond(ctx, farm) {
-    // Pond sits on the RIGHT side, just below the player's barn (shed) so
-    // all of your "stuff" (home, pen, barn, pond) clusters together.
+    // Pond sits on the RIGHT side, well below the player's barn so it
+    // doesn't clip into the shed. Cluster reads home → pen → barn → pond.
     const pondCX = (farm.cols + 4) * TILE_SIZE;
-    const pondCY = (farm.rows + 1) * TILE_SIZE;
+    const pondCY = (farm.rows + 3) * TILE_SIZE;
     this._drawPond(ctx, pondCX, pondCY);
     this._pondW = TILE_SIZE * 4;
     this._pondH = TILE_SIZE * 2.5;
@@ -400,21 +400,17 @@ export class Renderer {
     this._drawForestRing(ctx, farm);
 
     // Cottage = player's HOME (top of the right-side cluster).
-    // Shed   = player's BARN (bottom). A 2-tile gap between them holds
-    // the animal pen (drawn in _drawBuildings).
+    // Shed   = player's BARN (bottom). The animal pen sits in between
+    // (drawn in _drawBuildings); the pond sits below the barn.
     this._drawCottage(ctx, rx + 10, 30);
     this._drawShed(ctx, rx + 24, 30 + TILE_SIZE * 6.0);
-    this._drawTrough(ctx, rx + 30, 30 + TILE_SIZE * 8.0);
-    this._drawPot(ctx, rx + 4, 30 + TILE_SIZE * 2.5);
-    this._drawSign(ctx, rx + 150, 30 + TILE_SIZE * 9.0);
 
-    // Cosy clutter along the bottom margin
+    // Cosy clutter along the bottom margin (left half — clear of the
+    // right-side cluster and pond)
     this._drawBarrel(ctx, 30, by);
     this._drawBarrel(ctx, 70, by + 6);
     this._drawCrate(ctx, 130, by - 2);
     this._drawLogs(ctx, 210, by + 4);
-    this._drawPot(ctx, 300, by);
-    this._drawFlowerBed(ctx, 360, by - 4, 1);
     this._drawFlowerBed(ctx, fw * 0.25, by - 4, 2);
   }
 
@@ -422,8 +418,11 @@ export class Renderer {
     const fw = farm.cols * TILE_SIZE, fh = farm.rows * TILE_SIZE;
     const m = 44; // hug the border so it stays near the viewport
     const pts = [];
+    // Top + bottom rows of trees (skip the right side — it's where the
+    // home/pen/barn/pond cluster lives and trees would overlap it)
     for (let x = -m; x <= fw + m; x += 76) { pts.push([x, -m]); pts.push([x + 28, fh + m]); }
-    for (let y = 0; y <= fh; y += 78) { pts.push([-m, y]); pts.push([fw + m, y + 22]); }
+    // Left side only (right side is the player's-property cluster)
+    for (let y = 0; y <= fh; y += 78) { pts.push([-m, y]); }
     // Back-to-front so lower trees overlap correctly
     pts.sort((a, b) => a[1] - b[1]);
     pts.forEach(([x, y]) => {
@@ -1525,7 +1524,6 @@ export class Renderer {
     this._drawWalls(ctx, bx, wallTop, bw, wallH, b.color);
 
     const rc = Renderer.ROOF_COLORS[b.id] || { light: PALETTE.roofHi, dark: PALETTE.roofShade };
-    this._drawCobblePath(ctx, bx, by, bw, bh);
     const { peakX, peakY } = this._drawShingleRoof(ctx, bx, by, bw, wallTop, rc, 44);
 
     const winY = wallTop + 14;
@@ -1631,7 +1629,6 @@ export class Renderer {
     this._drawWalls(ctx, bx, wallTop, bw, wallH, b.color, { midRail: true });
 
     const rc = Renderer.ROOF_COLORS.home;
-    this._drawCobblePath(ctx, bx, by, bw, bh);
     const { peakX, peakY, roofBase } = this._drawShingleRoof(ctx, bx, by, bw, wallTop, rc, 84);
 
     // Two windows flanking the center
@@ -1715,7 +1712,6 @@ export class Renderer {
     this._drawWalls(ctx, bx, wallTop, bw, wallH, b.color, { midRail: true });
 
     const rc = Renderer.ROOF_COLORS.barn;
-    this._drawCobblePath(ctx, bx, by, bw, bh);
     const { peakX, peakY, roofBase } = this._drawShingleRoof(ctx, bx, by, bw, wallTop, rc, 84);
 
     // Hayloft window centered at roof peak
