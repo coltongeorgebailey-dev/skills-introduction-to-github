@@ -143,6 +143,9 @@ export class Renderer {
     // Buildings + NPCs outside the fence
     this._drawBuildings(ctx, game);
 
+    // Fishing pond (world-space, fixed location)
+    this._drawWildPond(ctx, farm);
+
     // Player
     this._drawPlayer(ctx, player);
 
@@ -257,14 +260,21 @@ export class Renderer {
       this._drawLeafyTree(ctx, px + TILE_SIZE / 2, py + TILE_SIZE / 2, 0.92 + (seed % 5) * 0.12, seed);
     });
 
-    // Fishing pond below-left of the farm
-    const pondX = offX + (-4) * TILE_SIZE + TILE_SIZE * 1.5;
-    const pondY = offY + (rows - 1) * TILE_SIZE + TILE_SIZE;
-    this._drawPond(ctx, pondX, pondY);
-    this._pondScreenX = pondX + farm.camX - TILE_SIZE;
-    this._pondScreenY = pondY + farm.camY - TILE_SIZE;
+    // (Pond is drawn in world-space from _renderFarm so it's at a fixed
+    // world location — see _drawWildPond below.)
+  }
+
+  _drawWildPond(ctx, farm) {
+    // Fixed world position: left of the fence, mid-height of the farm.
+    // Centered visually so the player can walk over and fish.
+    const pondCX = -5 * TILE_SIZE + TILE_SIZE * 2;     // world px center X
+    const pondCY = Math.floor(farm.rows / 2) * TILE_SIZE; // world px center Y
+    this._drawPond(ctx, pondCX, pondCY);
+    // Click hit-box (world coords; isPondClick converts back to screen)
     this._pondW = TILE_SIZE * 4;
     this._pondH = TILE_SIZE * 2.5;
+    this._pondScreenX = pondCX - this._pondW / 2;
+    this._pondScreenY = pondCY - this._pondH / 2;
   }
 
   _drawWildTile(ctx, px, py, tx, ty) {
