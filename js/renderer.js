@@ -1,4 +1,4 @@
-import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE, BUILDINGS } from './constants.js';
+import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE, BUILDINGS, ANIMAL_PEN } from './constants.js';
 
 // Deterministic pseudo-random per tile position
 function pr(x, y, s = 0) {
@@ -1232,407 +1232,750 @@ export class Renderer {
 
   // ── Buildings + NPCs ─────────────────────────────────────────────────────────
 
-  _drawBuildings(ctx, game) {
-    const { player } = game;
-    this._npcRects = [];
-    for (const b of BUILDINGS) {
-      const bx = b.x * TILE_SIZE;
-      const by = b.y * TILE_SIZE;
-      const bw = b.w * TILE_SIZE; // 96
-      const bh = b.h * TILE_SIZE; // 96
+  // Per-building roof colours (Stardew-style distinct roofs)
+  static get ROOF_COLORS() {
+    return {
+      market:   { light: '#e04820', dark: '#903010' },
+      barn:     { light: '#9a2418', dark: '#5e1408' },
+      home:     { light: '#4a78b8', dark: '#2e4e7e' },
+      upgrades: { light: '#7a7a8c', dark: '#4a4a5e' },
+      skins:    { light: '#9850d0', dark: '#5c2e88' },
+      gems:     { light: '#28a8c0', dark: '#1a6878' },
+      quests:   { light: '#c08830', dark: '#7a5418' },
+    };
+  }
 
-      // ── Ground shadow (soft ellipse) ─────────────────────────────────────────
+  _drawBuildings(ctx, game) {
+    this._npcRects = [];
+    // Village dirt path connecting all the buildings (drawn under everything)
+    this._drawVillagePath(ctx);
+    for (const b of BUILDINGS) {
+      // Ground shadow under every building
+      const bx = b.x * TILE_SIZE, by = b.y * TILE_SIZE;
+      const bw = b.w * TILE_SIZE, bh = b.h * TILE_SIZE;
       ctx.fillStyle = PALETTE.shadow;
       ctx.beginPath();
-      ctx.ellipse(bx + bw / 2, by + bh + 4, bw / 2 + 4, 8, 0, 0, Math.PI * 2);
+      ctx.ellipse(bx + bw / 2, by + bh + 4, bw / 2 + 6, 9, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // ── Foundation (bottom 12px) ─────────────────────────────────────────────
-      const foundY = by + bh - 12;
-      ctx.fillStyle = PALETTE.stone;
-      ctx.fillRect(bx, foundY, bw, 12);
-      // Brick-pattern alternating rows
-      for (let row = 0; row < 2; row++) {
-        const fy = foundY + row * 6;
-        const offset = (row % 2) * 14;
-        ctx.fillStyle = row % 2 === 0 ? PALETTE.stoneHi : PALETTE.stone;
-        for (let bk = -1; bk < 8; bk++) {
-          const fx = bx + bk * 28 + offset;
-          ctx.fillRect(fx + 1, fy + 1, 26, 4);
-        }
-      }
-      // Foundation bottom shadow
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx.fillRect(bx, foundY + 10, bw, 2);
+      if (b.id === 'home')      this._drawHomeBuilding(ctx, b);
+      else if (b.id === 'barn') this._drawBarnBuilding(ctx, b);
+      else                      this._drawGenericBuilding(ctx, b);
 
-      // ── Walls (72px tall above foundation) ──────────────────────────────────
-      const wallTop = by + bh - 12 - 72;
-      const wallH = 72;
-      ctx.fillStyle = b.color;
-      ctx.fillRect(bx, wallTop, bw, wallH);
-
-      // Horizontal plank lines every 8px
-      const plankDark = this._darken(b.color, 18);
-      for (let row = 1; row < 9; row++) {
-        ctx.fillStyle = plankDark;
-        ctx.fillRect(bx, wallTop + row * 8, bw, 1);
-      }
-
-      // Vertical corner posts
-      ctx.fillStyle = PALETTE.timber;
-      ctx.fillRect(bx, wallTop, 5, wallH);
-      ctx.fillRect(bx + bw - 5, wallTop, 5, wallH);
-      ctx.fillStyle = PALETTE.timberHi;
-      ctx.fillRect(bx + 1, wallTop, 2, wallH);
-
-      // Right-side shadow strip
-      ctx.fillStyle = 'rgba(0,0,0,0.30)';
-      ctx.fillRect(bx + bw - 13, wallTop, 8, wallH);
-
-      // ── Per-building roof colours (Stardew-style distinct roofs) ────────────
-      const ROOF_COLORS = {
-        market:   { light: '#e04820', dark: '#903010' }, // terracotta
-        barn:     { light: '#8a2010', dark: '#541408' }, // deep barn red
-        home:     { light: '#4a78b8', dark: '#2e4e7e' }, // slate blue
-        upgrades: { light: '#7a7a8c', dark: '#4a4a5e' }, // steel grey
-        skins:    { light: '#9850d0', dark: '#5c2e88' }, // vivid purple
-        gems:     { light: '#28a8c0', dark: '#1a6878' }, // teal
-        quests:   { light: '#c08830', dark: '#7a5418' }, // amber
-      };
-      const rc = ROOF_COLORS[b.id] || { light: PALETTE.roofHi, dark: PALETTE.roofShade };
-
-      // ── Stone cobblestone path leading to door ───────────────────────────────
-      const doorCX = bx + bw / 2;
-      for (let step = 0; step < 3; step++) {
-        const py2 = by + bh + step * 10;
-        ctx.fillStyle = step % 2 === 0 ? PALETTE.stone : PALETTE.stoneHi;
-        ctx.fillRect(doorCX - 14, py2, 28, 8);
-        ctx.fillStyle = 'rgba(0,0,0,0.1)';
-        ctx.fillRect(doorCX - 14, py2 + 7, 28, 1);
-      }
-
-      // ── Gable Roof (taller, more Stardew-like) ───────────────────────────────
-      const roofBase = wallTop;       // roof starts at wall top
-      const peakX = bx + bw / 2;
-      const peakY = roofBase - 44;    // 44px above wall top (was 36 — taller!)
-      const eaveL = bx - 10;          // 10px overhang
-      const eaveR = bx + bw + 10;
-
-      // Left slope (lighter — top-left light source)
-      ctx.fillStyle = rc.light;
-      ctx.beginPath();
-      ctx.moveTo(eaveL, roofBase);
-      ctx.lineTo(peakX, peakY);
-      ctx.lineTo(peakX, roofBase);
-      ctx.closePath();
-      ctx.fill();
-
-      // Right slope (darker)
-      ctx.fillStyle = rc.dark;
-      ctx.beginPath();
-      ctx.moveTo(peakX, peakY);
-      ctx.lineTo(eaveR, roofBase);
-      ctx.lineTo(peakX, roofBase);
-      ctx.closePath();
-      ctx.fill();
-
-      // Shingle rows on left slope (4 rows, lighter/darker alternating strips)
-      const slopeH = roofBase - peakY;
-      for (let row = 1; row <= 4; row++) {
-        const t = row / 4;
-        const sy = peakY + slopeH * t;
-        const halfW = (bw / 2 + 8) * t;
-        ctx.fillStyle = row % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)';
-        ctx.beginPath();
-        ctx.moveTo(peakX - halfW, sy);
-        ctx.lineTo(peakX, sy);
-        ctx.lineTo(peakX, sy - slopeH / 4);
-        ctx.lineTo(peakX - (bw / 2 + 8) * (row - 1) / 4, sy - slopeH / 4);
-        ctx.closePath();
-        ctx.fill();
-      }
-      // Shingle rows on right slope
-      for (let row = 1; row <= 4; row++) {
-        const t = row / 4;
-        const sy = peakY + slopeH * t;
-        const halfW = (bw / 2 + 8) * t;
-        ctx.fillStyle = row % 2 === 0 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.12)';
-        ctx.beginPath();
-        ctx.moveTo(peakX, sy);
-        ctx.lineTo(peakX + halfW, sy);
-        ctx.lineTo(peakX + (bw / 2 + 8) * (row - 1) / 4, sy - slopeH / 4);
-        ctx.lineTo(peakX, sy - slopeH / 4);
-        ctx.closePath();
-        ctx.fill();
-      }
-
-      // Ridge cap at peak
-      ctx.fillStyle = PALETTE.timber;
-      ctx.fillRect(peakX - 3, peakY - 2, 6, slopeH + 4);
-
-      // Eave shadow (where roof meets wall)
-      ctx.fillStyle = 'rgba(0,0,0,0.22)';
-      ctx.fillRect(bx, roofBase, bw, 4);
-
-      // ── Windows (left + right, bright warm glow) ─────────────────────────────
-      const drawWindow = (wx, wy) => {
-        // Warm glow halo behind window
-        ctx.fillStyle = 'rgba(255,230,100,0.25)';
-        ctx.fillRect(wx - 4, wy - 4, 36, 30);
-        // Outer frame
-        ctx.fillStyle = PALETTE.timber;
-        ctx.fillRect(wx, wy, 28, 22);
-        // Bright warm glass
-        ctx.fillStyle = '#ffe048';
-        ctx.fillRect(wx + 2, wy + 2, 24, 18);
-        // Cross divider
-        ctx.fillStyle = PALETTE.timber;
-        ctx.fillRect(wx + 2, wy + 11, 24, 2);
-        ctx.fillRect(wx + 13, wy + 2, 2, 18);
-        // White glints (pixel art sparkle)
-        ctx.fillStyle = 'rgba(255,255,255,0.90)';
-        ctx.fillRect(wx + 3, wy + 3, 2, 2);
-        ctx.fillRect(wx + 16, wy + 3, 2, 2);
-      };
-      const winY = wallTop + 14;
-      drawWindow(bx + 8, winY);           // left window
-      drawWindow(bx + bw - 36, winY);     // right window
-
-      // ── Door (centered horizontally, at building bottom) ─────────────────────
-      const doorW = 22, doorH = 32;
-      const doorX = bx + bw / 2 - doorW / 2;
-      const doorY = by + bh - doorH - 12; // sits on top of foundation
-      // Frame
-      ctx.fillStyle = PALETTE.timber;
-      ctx.fillRect(doorX, doorY, doorW, doorH);
-      // Panel
-      ctx.fillStyle = PALETTE.roofShade;
-      ctx.fillRect(doorX + 2, doorY + 2, doorW - 4, doorH - 2);
-      // Knob
-      ctx.fillStyle = '#caa23a';
-      ctx.fillRect(doorX + doorW - 6, doorY + Math.floor(doorH / 2) - 1, 3, 3);
-      // Stone step
-      ctx.fillStyle = PALETTE.stoneHi;
-      ctx.fillRect(doorX - 3, by + bh - 12, doorW + 6, 6);
-
-      // ── Building-specific accents ─────────────────────────────────────────────
-
-      if (b.id === 'barn') {
-        // Wide barn door (full-width, X-brace pattern)
-        const bdW = bw - 12, bdH = 38;
-        const bdX = bx + 6, bdY = by + bh - bdH - 12;
-        ctx.fillStyle = PALETTE.timber;
-        ctx.fillRect(bdX, bdY, bdW, bdH);
-        ctx.fillStyle = this._darken(b.color, 20);
-        ctx.fillRect(bdX + 2, bdY + 2, bdW / 2 - 3, bdH - 4);
-        ctx.fillRect(bdX + bdW / 2 + 1, bdY + 2, bdW / 2 - 3, bdH - 4);
-        // X-brace on left panel
-        ctx.strokeStyle = PALETTE.timber;
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(bdX + 2, bdY + 2); ctx.lineTo(bdX + bdW / 2 - 3, bdY + bdH - 4); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(bdX + bdW / 2 - 3, bdY + 2); ctx.lineTo(bdX + 2, bdY + bdH - 4); ctx.stroke();
-        // X-brace on right panel
-        ctx.beginPath(); ctx.moveTo(bdX + bdW / 2 + 1, bdY + 2); ctx.lineTo(bdX + bdW - 3, bdY + bdH - 4); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(bdX + bdW - 3, bdY + 2); ctx.lineTo(bdX + bdW / 2 + 1, bdY + bdH - 4); ctx.stroke();
-        // Hay bale on left side
-        ctx.fillStyle = '#d4a840';
-        ctx.fillRect(bx - 14, by + bh - 24, 18, 16);
-        ctx.fillStyle = '#b88828';
-        for (let i = 0; i < 3; i++) ctx.fillRect(bx - 13, by + bh - 22 + i * 5, 16, 2);
-        ctx.fillStyle = '#e0c060';
-        ctx.fillRect(bx - 13, by + bh - 23, 16, 2);
-
-      } else if (b.id === 'market') {
-        // Striped canvas awning above door
-        const awY = doorY - 10;
-        const awX = doorX - 10;
-        const awW = doorW + 20;
-        const awH = 12;
-        const stripes = ['#d44020', '#f0f0e0'];
-        for (let s = 0; s < 5; s++) {
-          ctx.fillStyle = stripes[s % 2];
-          ctx.fillRect(awX + s * (awW / 5), awY, Math.ceil(awW / 5), awH);
-        }
-        ctx.fillStyle = PALETTE.timber;
-        ctx.fillRect(awX, awY, awW, 2);
-        ctx.fillRect(awX, awY + awH - 2, awW, 2);
-        // Crate / barrel at bottom-left
-        ctx.fillStyle = '#9a7040';
-        ctx.fillRect(bx + 4, by + bh - 26, 18, 18);
-        ctx.fillStyle = PALETTE.timber;
-        ctx.fillRect(bx + 4, by + bh - 20, 18, 2);
-        ctx.fillRect(bx + 4, by + bh - 13, 18, 2);
-        ctx.fillStyle = '#b89060';
-        ctx.fillRect(bx + 5, by + bh - 25, 16, 4);
-
-      } else if (b.id === 'home') {
-        // Chimney on right side of roof
-        const chX = bx + bw - 20;
-        const chY = peakY - 8;
-        ctx.fillStyle = PALETTE.stone;
-        ctx.fillRect(chX, chY, 10, roofBase - chY - 8);
-        ctx.fillStyle = PALETTE.stoneHi;
-        ctx.fillRect(chX, chY, 10, 4);
-        ctx.fillRect(chX, chY, 2, roofBase - chY - 8);
-        // Smoke puff hint
-        ctx.fillStyle = 'rgba(200,200,200,0.35)';
-        ctx.beginPath(); ctx.arc(chX + 5, chY - 6, 5, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(chX + 8, chY - 12, 4, 0, Math.PI * 2); ctx.fill();
-        // Flower box under left window
-        const fbX = bx + 6, fbY = winY + 22;
-        ctx.fillStyle = PALETTE.timber;
-        ctx.fillRect(fbX, fbY, 32, 7);
-        const flowerCols = ['#ff6090', '#ff9a20', '#ffee44'];
-        for (let f = 0; f < 5; f++) {
-          ctx.fillStyle = '#4a9a30';
-          ctx.fillRect(fbX + 3 + f * 5, fbY - 4, 2, 5);
-          ctx.fillStyle = flowerCols[f % flowerCols.length];
-          ctx.beginPath(); ctx.arc(fbX + 4 + f * 5, fbY - 5, 2.5, 0, Math.PI * 2); ctx.fill();
-        }
-
-      } else if (b.id === 'upgrades') {
-        // Gear icon on wall between window and door
-        const gx = bx + bw * 3 / 4;
-        const gy = wallTop + wallH / 2 + 4;
-        const gr = 10;
-        ctx.strokeStyle = '#c0c0c0';
-        ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.arc(gx, gy, gr * 0.45, 0, Math.PI * 2); ctx.stroke();
-        // Gear teeth (8 teeth)
-        ctx.fillStyle = '#b8b8c0';
-        for (let t = 0; t < 8; t++) {
-          const ang = (t / 8) * Math.PI * 2;
-          const tx2 = gx + Math.cos(ang) * (gr + 3);
-          const ty2 = gy + Math.sin(ang) * (gr + 3);
-          ctx.save();
-          ctx.translate(tx2, ty2);
-          ctx.rotate(ang);
-          ctx.fillRect(-2, -3, 4, 6);
-          ctx.restore();
-        }
-        ctx.lineWidth = 1;
-
-      } else if (b.id === 'skins') {
-        // Hanging colorful banner/flag from roof peak
-        const banW = 10, banH = 18;
-        const colors6 = ['#e04040', '#e0a020', '#40c040', '#4080e0', '#a040c0'];
-        for (let i = 0; i < 5; i++) {
-          const bfx = peakX - 28 + i * 14;
-          const bfy = peakY + 2;
-          ctx.fillStyle = colors6[i];
-          ctx.beginPath();
-          ctx.moveTo(bfx, bfy);
-          ctx.lineTo(bfx + banW, bfy);
-          ctx.lineTo(bfx + banW / 2, bfy + banH);
-          ctx.closePath();
-          ctx.fill();
-        }
-        // String
-        ctx.strokeStyle = PALETTE.timber;
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(peakX - 28, peakY + 2); ctx.lineTo(peakX + 36, peakY + 2); ctx.stroke();
-
-      } else if (b.id === 'gems') {
-        // 3 small diamond shapes on wall
-        const gemColors = ['#60d0f0', '#a060f0', '#f06080'];
-        for (let g = 0; g < 3; g++) {
-          const gx2 = bx + bw * 3 / 4 - 8 + g * 16;
-          const gy2 = wallTop + wallH / 2 + 2;
-          ctx.fillStyle = gemColors[g];
-          ctx.beginPath();
-          ctx.moveTo(gx2, gy2 - 8);
-          ctx.lineTo(gx2 + 6, gy2);
-          ctx.lineTo(gx2, gy2 + 8);
-          ctx.lineTo(gx2 - 6, gy2);
-          ctx.closePath();
-          ctx.fill();
-          ctx.fillStyle = 'rgba(255,255,255,0.50)';
-          ctx.beginPath();
-          ctx.moveTo(gx2, gy2 - 8);
-          ctx.lineTo(gx2 + 6, gy2);
-          ctx.lineTo(gx2, gy2 - 1);
-          ctx.closePath();
-          ctx.fill();
-        }
-
-      } else if (b.id === 'quests') {
-        // Notice board on wall
-        const nbX = bx + bw * 3 / 4 - 14;
-        const nbY = wallTop + 10;
-        ctx.fillStyle = '#7a5020';
-        ctx.fillRect(nbX, nbY, 28, 22);
-        ctx.fillStyle = '#f0e8d0';
-        ctx.fillRect(nbX + 2, nbY + 2, 24, 18);
-        // Paper lines
-        ctx.fillStyle = '#888870';
-        for (let ln = 0; ln < 3; ln++) ctx.fillRect(nbX + 4, nbY + 5 + ln * 5, 20, 1);
-        // Pin
-        ctx.fillStyle = '#e04040';
-        ctx.fillRect(nbX + 12, nbY + 1, 4, 4);
-      }
-
-      // ── Sign post above building ──────────────────────────────────────────────
-      const signPostX = peakX - 2;
-      const signPostTop = peakY - 20;
-      ctx.fillStyle = PALETTE.timber;
-      ctx.fillRect(signPostX, signPostTop, 4, 22);
-
-      // Sign board (rounded rect approximated with fillRect + arcs)
-      const signW = 60, signH = 18;
-      const signX = peakX - signW / 2;
-      const signY = signPostTop - signH;
-      ctx.fillStyle = PALETTE.timber;
-      ctx.fillRect(signX + 3, signY, signW - 6, signH);
-      ctx.fillRect(signX, signY + 3, signW, signH - 6);
-      // Corner rounding approximation
-      ctx.beginPath(); ctx.arc(signX + 3, signY + 3, 3, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(signX + signW - 3, signY + 3, 3, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(signX + 3, signY + signH - 3, 3, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(signX + signW - 3, signY + signH - 3, 3, 0, Math.PI * 2); ctx.fill();
-      // Plaster infill
-      ctx.fillStyle = PALETTE.plaster;
-      ctx.fillRect(signX + 2, signY + 2, signW - 4, signH - 4);
-
-      // Icon + label on sign
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = '10px serif';
-      ctx.fillText(b.icon, signX + 14, signY + signH / 2);
-      ctx.font = 'bold 9px monospace';
-      ctx.fillStyle = PALETTE.timber;
-      ctx.fillText(b.label, signX + signW / 2 + 4, signY + signH / 2);
-
-      // ── NPC ──────────────────────────────────────────────────────────────────
-      const npc = b.npc;
-      const nx = npc.x * TILE_SIZE;
-      const ny = npc.y * TILE_SIZE;
-      this._drawNpc(ctx, nx, ny, b.color);
-
-      const near = Math.max(Math.abs(player.gridX - npc.x), Math.abs(player.gridY - npc.y)) <= 1;
-      if (near) {
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-        ctx.lineWidth = 4;
-        ctx.font = 'bold 13px monospace';
-        const msg = '💬 Talk';
-        ctx.strokeText(msg, nx + TILE_SIZE / 2, ny - 14);
-        ctx.fillText(msg, nx + TILE_SIZE / 2, ny - 14);
-      }
-
-      this._npcRects.push({
-        action: b.action,
-        name: npc.name,
-        line: npc.line,
-        sx: nx - game.farm.camX,
-        sy: ny - game.farm.camY,
-        sw: TILE_SIZE,
-        sh: TILE_SIZE,
-      });
+      this._drawBuildingSignAndNpc(ctx, b, game);
     }
+    this._drawAnimalPen(ctx, game);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.lineWidth = 1;
+  }
+
+  // ── Village dirt path ──────────────────────────────────────────────────────
+
+  _drawVillagePath(ctx) {
+    // Wide horizontal dirt strip in front of all buildings (world tiles y=-1).
+    // Connects the leftmost building (Market x=-6) to the rightmost (Quests x=12+1).
+    const x0 = -7 * TILE_SIZE;
+    const x1 = 14 * TILE_SIZE;
+    const y0 = -1 * TILE_SIZE - 4;
+    const ph = 28;
+    ctx.fillStyle = '#a07848';
+    ctx.fillRect(x0, y0, x1 - x0, ph);
+    // Speckles
+    ctx.fillStyle = '#7e5a30';
+    for (let s = 0; s < 80; s++) {
+      const sx = x0 + ((s * 47 + 13) % (x1 - x0));
+      const sy = y0 + ((s * 19 + 7) % ph);
+      ctx.fillRect(sx, sy, 2, 1);
+    }
+    ctx.fillStyle = '#bc9060';
+    for (let s = 0; s < 50; s++) {
+      const sx = x0 + ((s * 31 + 5) % (x1 - x0));
+      const sy = y0 + ((s * 23 + 11) % ph);
+      ctx.fillRect(sx, sy, 1, 1);
+    }
+    // Top + bottom edge shadows
+    ctx.fillStyle = 'rgba(0,0,0,0.20)';
+    ctx.fillRect(x0, y0, x1 - x0, 2);
+    ctx.fillRect(x0, y0 + ph - 2, x1 - x0, 2);
+  }
+
+  // ── Shared helpers ─────────────────────────────────────────────────────────
+
+  _drawFoundation(ctx, bx, by, bw, bh) {
+    const foundY = by + bh - 12;
+    ctx.fillStyle = PALETTE.stone;
+    ctx.fillRect(bx, foundY, bw, 12);
+    for (let row = 0; row < 2; row++) {
+      const fy = foundY + row * 6;
+      const offset = (row % 2) * 14;
+      ctx.fillStyle = row % 2 === 0 ? PALETTE.stoneHi : PALETTE.stone;
+      for (let bk = -1; bk < 8; bk++) {
+        const fx = bx + bk * 28 + offset;
+        ctx.fillRect(fx + 1, fy + 1, 26, 4);
+      }
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(bx, foundY + 10, bw, 2);
+  }
+
+  _drawCobblePath(ctx, bx, by, bw, bh) {
+    const doorCX = bx + bw / 2;
+    for (let step = 0; step < 3; step++) {
+      const py2 = by + bh + step * 10;
+      ctx.fillStyle = step % 2 === 0 ? PALETTE.stone : PALETTE.stoneHi;
+      ctx.fillRect(doorCX - 14, py2, 28, 8);
+      ctx.fillStyle = 'rgba(0,0,0,0.1)';
+      ctx.fillRect(doorCX - 14, py2 + 7, 28, 1);
+    }
+  }
+
+  _drawShingleRoof(ctx, bx, by, bw, wallTop, rc, peakLift) {
+    const peakX = bx + bw / 2;
+    const roofBase = wallTop;
+    const peakY = roofBase - peakLift;
+    const eaveL = bx - 12;
+    const eaveR = bx + bw + 12;
+
+    // Left slope
+    ctx.fillStyle = rc.light;
+    ctx.beginPath();
+    ctx.moveTo(eaveL, roofBase);
+    ctx.lineTo(peakX, peakY);
+    ctx.lineTo(peakX, roofBase);
+    ctx.closePath();
+    ctx.fill();
+    // Right slope
+    ctx.fillStyle = rc.dark;
+    ctx.beginPath();
+    ctx.moveTo(peakX, peakY);
+    ctx.lineTo(eaveR, roofBase);
+    ctx.lineTo(peakX, roofBase);
+    ctx.closePath();
+    ctx.fill();
+
+    // Scalloped shingle rows (small arc detail) — left slope
+    const slopeH = roofBase - peakY;
+    const rows = 5;
+    for (let row = 1; row <= rows; row++) {
+      const t = row / rows;
+      const sy = peakY + slopeH * t;
+      const halfW = (bw / 2 + 10) * t;
+      ctx.fillStyle = row % 2 === 0 ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.14)';
+      ctx.beginPath();
+      ctx.moveTo(peakX - halfW, sy);
+      ctx.lineTo(peakX, sy);
+      ctx.lineTo(peakX, sy - slopeH / rows);
+      ctx.lineTo(peakX - (bw / 2 + 10) * (row - 1) / rows, sy - slopeH / rows);
+      ctx.closePath();
+      ctx.fill();
+      // Scallop dots along the row
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      const startX = peakX - halfW;
+      const segs = Math.max(2, Math.floor(halfW / 8));
+      for (let s = 0; s < segs; s++) {
+        const dx = startX + (halfW / segs) * s + 3;
+        ctx.fillRect(dx, sy - 1, 2, 1);
+      }
+    }
+    for (let row = 1; row <= rows; row++) {
+      const t = row / rows;
+      const sy = peakY + slopeH * t;
+      const halfW = (bw / 2 + 10) * t;
+      ctx.fillStyle = row % 2 === 0 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.18)';
+      ctx.beginPath();
+      ctx.moveTo(peakX, sy);
+      ctx.lineTo(peakX + halfW, sy);
+      ctx.lineTo(peakX + (bw / 2 + 10) * (row - 1) / rows, sy - slopeH / rows);
+      ctx.lineTo(peakX, sy - slopeH / rows);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Ridge cap at peak
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(peakX - 3, peakY - 2, 6, slopeH + 4);
+
+    // Eave shadow line where roof meets wall
+    ctx.fillStyle = 'rgba(0,0,0,0.24)';
+    ctx.fillRect(bx - 8, roofBase, bw + 16, 4);
+
+    return { peakX, peakY, roofBase, slopeH };
+  }
+
+  _drawWalls(ctx, bx, wallTop, bw, wallH, color, opts = {}) {
+    ctx.fillStyle = color;
+    ctx.fillRect(bx, wallTop, bw, wallH);
+
+    // Horizontal plank lines
+    const plankDark = this._darken(color, 18);
+    for (let row = 1; row < Math.floor(wallH / 8); row++) {
+      ctx.fillStyle = plankDark;
+      ctx.fillRect(bx, wallTop + row * 8, bw, 1);
+    }
+
+    // Mid-rail (timber stripe at mid-height) — gives the "framed" Stardew look
+    if (opts.midRail) {
+      ctx.fillStyle = PALETTE.timber;
+      ctx.fillRect(bx, wallTop + Math.floor(wallH / 2) - 2, bw, 4);
+      ctx.fillStyle = PALETTE.timberHi;
+      ctx.fillRect(bx, wallTop + Math.floor(wallH / 2) - 2, bw, 1);
+    }
+
+    // Vertical corner posts
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(bx, wallTop, 5, wallH);
+    ctx.fillRect(bx + bw - 5, wallTop, 5, wallH);
+    ctx.fillStyle = PALETTE.timberHi;
+    ctx.fillRect(bx + 1, wallTop, 2, wallH);
+
+    // Right-side shadow strip
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.fillRect(bx + bw - 13, wallTop, 8, wallH);
+  }
+
+  _drawWindow(ctx, wx, wy) {
+    ctx.fillStyle = 'rgba(255,230,100,0.25)';
+    ctx.fillRect(wx - 4, wy - 4, 36, 30);
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(wx, wy, 28, 22);
+    ctx.fillStyle = '#ffe048';
+    ctx.fillRect(wx + 2, wy + 2, 24, 18);
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(wx + 2, wy + 11, 24, 2);
+    ctx.fillRect(wx + 13, wy + 2, 2, 18);
+    ctx.fillStyle = 'rgba(255,255,255,0.90)';
+    ctx.fillRect(wx + 3, wy + 3, 2, 2);
+    ctx.fillRect(wx + 16, wy + 3, 2, 2);
+  }
+
+  _drawDoor(ctx, doorX, doorY, doorW, doorH, foundationY) {
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(doorX, doorY, doorW, doorH);
+    ctx.fillStyle = PALETTE.roofShade;
+    ctx.fillRect(doorX + 2, doorY + 2, doorW - 4, doorH - 2);
+    // Vertical panel divider
+    ctx.fillStyle = this._darken('#5c3720', 15);
+    ctx.fillRect(doorX + doorW / 2 - 1, doorY + 4, 2, doorH - 8);
+    // Knob
+    ctx.fillStyle = '#caa23a';
+    ctx.fillRect(doorX + doorW - 6, doorY + Math.floor(doorH / 2) - 1, 3, 3);
+    // Stone step
+    ctx.fillStyle = PALETTE.stoneHi;
+    ctx.fillRect(doorX - 3, foundationY, doorW + 6, 6);
+  }
+
+  // ── Generic building (market / upgrades / skins / gems / quests) ──────────
+
+  _drawGenericBuilding(ctx, b) {
+    const bx = b.x * TILE_SIZE, by = b.y * TILE_SIZE;
+    const bw = b.w * TILE_SIZE, bh = b.h * TILE_SIZE;
+    const wallTop = by + bh - 12 - 72;
+    const wallH = 72;
+
+    this._drawFoundation(ctx, bx, by, bw, bh);
+    this._drawWalls(ctx, bx, wallTop, bw, wallH, b.color);
+
+    const rc = Renderer.ROOF_COLORS[b.id] || { light: PALETTE.roofHi, dark: PALETTE.roofShade };
+    this._drawCobblePath(ctx, bx, by, bw, bh);
+    const { peakX, peakY } = this._drawShingleRoof(ctx, bx, by, bw, wallTop, rc, 44);
+
+    const winY = wallTop + 14;
+    this._drawWindow(ctx, bx + 8, winY);
+    this._drawWindow(ctx, bx + bw - 36, winY);
+
+    const doorW = 22, doorH = 32;
+    const doorX = bx + bw / 2 - doorW / 2;
+    const doorY = by + bh - doorH - 12;
+    this._drawDoor(ctx, doorX, doorY, doorW, doorH, by + bh - 12);
+
+    // Accents
+    if (b.id === 'market') {
+      const awY = doorY - 10, awX = doorX - 10, awW = doorW + 20, awH = 12;
+      const stripes = ['#d44020', '#f0f0e0'];
+      for (let s = 0; s < 5; s++) {
+        ctx.fillStyle = stripes[s % 2];
+        ctx.fillRect(awX + s * (awW / 5), awY, Math.ceil(awW / 5), awH);
+      }
+      ctx.fillStyle = PALETTE.timber;
+      ctx.fillRect(awX, awY, awW, 2);
+      ctx.fillRect(awX, awY + awH - 2, awW, 2);
+      ctx.fillStyle = '#9a7040';
+      ctx.fillRect(bx + 4, by + bh - 26, 18, 18);
+      ctx.fillStyle = PALETTE.timber;
+      ctx.fillRect(bx + 4, by + bh - 20, 18, 2);
+      ctx.fillRect(bx + 4, by + bh - 13, 18, 2);
+      ctx.fillStyle = '#b89060';
+      ctx.fillRect(bx + 5, by + bh - 25, 16, 4);
+    } else if (b.id === 'upgrades') {
+      const gx = bx + bw * 3 / 4, gy = wallTop + wallH / 2 + 4, gr = 10;
+      ctx.strokeStyle = '#c0c0c0';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(gx, gy, gr * 0.45, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#b8b8c0';
+      for (let t = 0; t < 8; t++) {
+        const ang = (t / 8) * Math.PI * 2;
+        const tx2 = gx + Math.cos(ang) * (gr + 3);
+        const ty2 = gy + Math.sin(ang) * (gr + 3);
+        ctx.save();
+        ctx.translate(tx2, ty2);
+        ctx.rotate(ang);
+        ctx.fillRect(-2, -3, 4, 6);
+        ctx.restore();
+      }
+      ctx.lineWidth = 1;
+    } else if (b.id === 'skins') {
+      const banW = 10, banH = 18;
+      const colors6 = ['#e04040', '#e0a020', '#40c040', '#4080e0', '#a040c0'];
+      for (let i = 0; i < 5; i++) {
+        const bfx = peakX - 28 + i * 14;
+        const bfy = peakY + 2;
+        ctx.fillStyle = colors6[i];
+        ctx.beginPath();
+        ctx.moveTo(bfx, bfy);
+        ctx.lineTo(bfx + banW, bfy);
+        ctx.lineTo(bfx + banW / 2, bfy + banH);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.strokeStyle = PALETTE.timber;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(peakX - 28, peakY + 2); ctx.lineTo(peakX + 36, peakY + 2); ctx.stroke();
+    } else if (b.id === 'gems') {
+      const gemColors = ['#60d0f0', '#a060f0', '#f06080'];
+      for (let g = 0; g < 3; g++) {
+        const gx2 = bx + bw * 3 / 4 - 8 + g * 16;
+        const gy2 = wallTop + wallH / 2 + 2;
+        ctx.fillStyle = gemColors[g];
+        ctx.beginPath();
+        ctx.moveTo(gx2, gy2 - 8); ctx.lineTo(gx2 + 6, gy2);
+        ctx.lineTo(gx2, gy2 + 8); ctx.lineTo(gx2 - 6, gy2);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.50)';
+        ctx.beginPath();
+        ctx.moveTo(gx2, gy2 - 8); ctx.lineTo(gx2 + 6, gy2);
+        ctx.lineTo(gx2, gy2 - 1);
+        ctx.closePath(); ctx.fill();
+      }
+    } else if (b.id === 'quests') {
+      const nbX = bx + bw * 3 / 4 - 14, nbY = wallTop + 10;
+      ctx.fillStyle = '#7a5020';
+      ctx.fillRect(nbX, nbY, 28, 22);
+      ctx.fillStyle = '#f0e8d0';
+      ctx.fillRect(nbX + 2, nbY + 2, 24, 18);
+      ctx.fillStyle = '#888870';
+      for (let ln = 0; ln < 3; ln++) ctx.fillRect(nbX + 4, nbY + 5 + ln * 5, 20, 1);
+      ctx.fillStyle = '#e04040';
+      ctx.fillRect(nbX + 12, nbY + 1, 4, 4);
+    }
+  }
+
+  // ── Home (cottage) ─────────────────────────────────────────────────────────
+
+  _drawHomeBuilding(ctx, b) {
+    const bx = b.x * TILE_SIZE, by = b.y * TILE_SIZE;
+    const bw = b.w * TILE_SIZE, bh = b.h * TILE_SIZE;
+    const wallH = 90;
+    const wallTop = by + bh - 12 - wallH;
+
+    this._drawFoundation(ctx, bx, by, bw, bh);
+    this._drawWalls(ctx, bx, wallTop, bw, wallH, b.color, { midRail: true });
+
+    const rc = Renderer.ROOF_COLORS.home;
+    this._drawCobblePath(ctx, bx, by, bw, bh);
+    const { peakX, peakY, roofBase } = this._drawShingleRoof(ctx, bx, by, bw, wallTop, rc, 84);
+
+    // Two windows flanking the center
+    const winY = wallTop + 10;
+    this._drawWindow(ctx, bx + 8, winY);
+    this._drawWindow(ctx, bx + bw - 36, winY);
+
+    // Flower boxes under BOTH windows
+    const flowerCols = ['#ff6090', '#ff9a20', '#ffee44', '#a070ff'];
+    const drawFlowerBox = (fbX) => {
+      const fbY = winY + 24;
+      ctx.fillStyle = PALETTE.timber;
+      ctx.fillRect(fbX, fbY, 28, 7);
+      ctx.fillStyle = PALETTE.timberHi;
+      ctx.fillRect(fbX, fbY, 28, 1);
+      for (let f = 0; f < 4; f++) {
+        ctx.fillStyle = '#4a9a30';
+        ctx.fillRect(fbX + 4 + f * 6, fbY - 4, 2, 5);
+        ctx.fillStyle = flowerCols[(f + (fbX | 0)) % flowerCols.length];
+        ctx.beginPath();
+        ctx.arc(fbX + 5 + f * 6, fbY - 5, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    };
+    drawFlowerBox(bx + 8);
+    drawFlowerBox(bx + bw - 36);
+
+    // Door with rounded arch step + wreath
+    const doorW = 24, doorH = 36;
+    const doorX = bx + bw / 2 - doorW / 2;
+    const doorY = by + bh - doorH - 12;
+    this._drawDoor(ctx, doorX, doorY, doorW, doorH, by + bh - 12);
+    // Wreath above door
+    ctx.strokeStyle = '#3a7a26';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(doorX + doorW / 2, doorY - 4, 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#e04040';
+    ctx.fillRect(doorX + doorW / 2 - 1, doorY + 2, 3, 3);
+    ctx.lineWidth = 1;
+
+    // Brick chimney on right side of roof
+    const chX = bx + bw - 22, chY = peakY - 6;
+    const chH = roofBase - chY - 6;
+    ctx.fillStyle = '#9a3a20';
+    ctx.fillRect(chX, chY, 12, chH);
+    // Brick rows
+    ctx.fillStyle = '#7a2810';
+    for (let r = 0; r < chH; r += 5) {
+      ctx.fillRect(chX, chY + r, 12, 1);
+      const off = (r / 5) % 2 === 0 ? 0 : 6;
+      ctx.fillRect(chX + off, chY + r + 1, 1, 3);
+    }
+    // Cap
+    ctx.fillStyle = PALETTE.stone;
+    ctx.fillRect(chX - 2, chY, 16, 4);
+    // Animated smoke puffs
+    const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.001;
+    for (let p = 0; p < 3; p++) {
+      const phase = (t + p * 0.7) % 2.2;
+      const rise = phase * 14;
+      const alpha = Math.max(0, 0.55 - phase * 0.25);
+      const r2 = 4 + phase * 1.5;
+      ctx.fillStyle = `rgba(220,220,220,${alpha.toFixed(2)})`;
+      ctx.beginPath();
+      ctx.arc(chX + 6 + Math.sin(phase * 1.8 + p) * 3, chY - 4 - rise, r2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ── Barn ───────────────────────────────────────────────────────────────────
+
+  _drawBarnBuilding(ctx, b) {
+    const bx = b.x * TILE_SIZE, by = b.y * TILE_SIZE;
+    const bw = b.w * TILE_SIZE, bh = b.h * TILE_SIZE;
+    const wallH = 90;
+    const wallTop = by + bh - 12 - wallH;
+
+    this._drawFoundation(ctx, bx, by, bw, bh);
+    this._drawWalls(ctx, bx, wallTop, bw, wallH, b.color, { midRail: true });
+
+    const rc = Renderer.ROOF_COLORS.barn;
+    this._drawCobblePath(ctx, bx, by, bw, bh);
+    const { peakX, peakY, roofBase } = this._drawShingleRoof(ctx, bx, by, bw, wallTop, rc, 84);
+
+    // Hayloft window centered at roof peak
+    const hlW = 18, hlH = 14;
+    const hlX = peakX - hlW / 2;
+    const hlY = peakY + 8;
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(hlX - 2, hlY - 2, hlW + 4, hlH + 4);
+    ctx.fillStyle = '#2a1a10';
+    ctx.fillRect(hlX, hlY, hlW, hlH);
+    // Hay tufts poking out
+    ctx.fillStyle = '#e8c050';
+    for (let i = 0; i < 5; i++) {
+      ctx.fillRect(hlX + 2 + i * 3, hlY + hlH - 3, 1, 4);
+    }
+    ctx.fillStyle = '#caa23a';
+    ctx.fillRect(hlX, hlY + hlH - 1, hlW, 2);
+
+    // Two small windows flanking the doors
+    const winY = wallTop + 8;
+    this._drawWindow(ctx, bx + 4, winY);
+    this._drawWindow(ctx, bx + bw - 32, winY);
+
+    // Wide double doors with X-brace on each panel
+    const bdW = bw - 16, bdH = 48;
+    const bdX = bx + 8, bdY = by + bh - bdH - 12;
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(bdX, bdY, bdW, bdH);
+    ctx.fillStyle = this._darken(b.color, 24);
+    ctx.fillRect(bdX + 2, bdY + 2, bdW / 2 - 3, bdH - 4);
+    ctx.fillRect(bdX + bdW / 2 + 1, bdY + 2, bdW / 2 - 3, bdH - 4);
+    // Vertical plank lines inside panels
+    ctx.fillStyle = this._darken(b.color, 34);
+    for (let v = 1; v < 4; v++) {
+      const px = bdX + 2 + v * ((bdW / 2 - 3) / 4);
+      ctx.fillRect(px, bdY + 2, 1, bdH - 4);
+      ctx.fillRect(px + bdW / 2 - 1, bdY + 2, 1, bdH - 4);
+    }
+    // X-braces
+    ctx.strokeStyle = PALETTE.timber;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(bdX + 2, bdY + 2); ctx.lineTo(bdX + bdW / 2 - 3, bdY + bdH - 4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bdX + bdW / 2 - 3, bdY + 2); ctx.lineTo(bdX + 2, bdY + bdH - 4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bdX + bdW / 2 + 1, bdY + 2); ctx.lineTo(bdX + bdW - 3, bdY + bdH - 4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bdX + bdW - 3, bdY + 2); ctx.lineTo(bdX + bdW / 2 + 1, bdY + bdH - 4); ctx.stroke();
+    // Center seam + handles
+    ctx.strokeStyle = this._darken(b.color, 50);
+    ctx.beginPath(); ctx.moveTo(bdX + bdW / 2, bdY); ctx.lineTo(bdX + bdW / 2, bdY + bdH); ctx.stroke();
+    ctx.fillStyle = '#caa23a';
+    ctx.fillRect(bdX + bdW / 2 - 4, bdY + bdH / 2 - 1, 3, 3);
+    ctx.fillRect(bdX + bdW / 2 + 1, bdY + bdH / 2 - 1, 3, 3);
+    ctx.lineWidth = 1;
+  }
+
+  // ── Shared sign + NPC + Talk prompt ────────────────────────────────────────
+
+  _drawBuildingSignAndNpc(ctx, b, game) {
+    const bx = b.x * TILE_SIZE, by = b.y * TILE_SIZE;
+    const bw = b.w * TILE_SIZE, bh = b.h * TILE_SIZE;
+    const wallH = (b.id === 'home' || b.id === 'barn') ? 90 : 72;
+    const wallTop = by + bh - 12 - wallH;
+    const peakLift = (b.id === 'home' || b.id === 'barn') ? 84 : 44;
+    const peakX = bx + bw / 2;
+    const peakY = wallTop - peakLift;
+
+    // Sign post
+    const signPostX = peakX - 2;
+    const signPostTop = peakY - 20;
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(signPostX, signPostTop, 4, 22);
+
+    const signW = 60, signH = 18;
+    const signX = peakX - signW / 2;
+    const signY = signPostTop - signH;
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillRect(signX + 3, signY, signW - 6, signH);
+    ctx.fillRect(signX, signY + 3, signW, signH - 6);
+    ctx.beginPath(); ctx.arc(signX + 3, signY + 3, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(signX + signW - 3, signY + 3, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(signX + 3, signY + signH - 3, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(signX + signW - 3, signY + signH - 3, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = PALETTE.plaster;
+    ctx.fillRect(signX + 2, signY + 2, signW - 4, signH - 4);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '10px serif';
+    ctx.fillText(b.icon, signX + 14, signY + signH / 2);
+    ctx.font = 'bold 9px monospace';
+    ctx.fillStyle = PALETTE.timber;
+    ctx.fillText(b.label, signX + signW / 2 + 4, signY + signH / 2);
+
+    const npc = b.npc;
+    const nx = npc.x * TILE_SIZE;
+    const ny = npc.y * TILE_SIZE;
+    this._drawNpc(ctx, nx, ny, b.color);
+
+    const player = game.player;
+    const near = Math.max(Math.abs(player.gridX - npc.x), Math.abs(player.gridY - npc.y)) <= 1;
+    if (near) {
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = 4;
+      ctx.font = 'bold 13px monospace';
+      const msg = '💬 Talk';
+      ctx.strokeText(msg, nx + TILE_SIZE / 2, ny - 14);
+      ctx.fillText(msg, nx + TILE_SIZE / 2, ny - 14);
+    }
+
+    this._npcRects.push({
+      action: b.action,
+      name: npc.name,
+      line: npc.line,
+      sx: nx - game.farm.camX,
+      sy: ny - game.farm.camY,
+      sw: TILE_SIZE,
+      sh: TILE_SIZE,
+    });
+  }
+
+  // ── Animal Pen + animals ───────────────────────────────────────────────────
+
+  _drawAnimalPen(ctx, game) {
+    const p = ANIMAL_PEN;
+    const px = p.x * TILE_SIZE, py = p.y * TILE_SIZE;
+    const pw = p.w * TILE_SIZE, ph = p.h * TILE_SIZE;
+
+    // Dirt floor
+    ctx.fillStyle = '#a07848';
+    ctx.fillRect(px, py, pw, ph);
+    // Darker speckles
+    ctx.fillStyle = '#7e5a30';
+    for (let i = 0; i < 22; i++) {
+      const sx = px + ((i * 17 + 5) % (pw - 2));
+      const sy = py + ((i * 29 + 11) % (ph - 2));
+      ctx.fillRect(sx, sy, 2, 1);
+    }
+    // Tan highlights
+    ctx.fillStyle = '#bc9060';
+    for (let i = 0; i < 14; i++) {
+      const sx = px + ((i * 23 + 9) % (pw - 2));
+      const sy = py + ((i * 13 + 7) % (ph - 2));
+      ctx.fillRect(sx, sy, 1, 1);
+    }
+    // Edge shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.20)';
+    ctx.fillRect(px, py, pw, 2);
+    ctx.fillRect(px, py + ph - 2, pw, 2);
+    ctx.fillRect(px, py, 2, ph);
+    ctx.fillRect(px + pw - 2, py, 2, ph);
+
+    // Post-and-rail fence — skip top side (faces barn)
+    const drawPost = (x, y) => {
+      ctx.fillStyle = PALETTE.timber;
+      ctx.fillRect(x - 2, y - 8, 4, 12);
+      ctx.fillStyle = PALETTE.timberHi;
+      ctx.fillRect(x - 2, y - 8, 1, 12);
+    };
+    const drawRail = (x1, x2, y) => {
+      ctx.fillStyle = PALETTE.timberHi;
+      ctx.fillRect(x1, y - 2, x2 - x1, 3);
+      ctx.fillStyle = PALETTE.timber;
+      ctx.fillRect(x1, y + 1, x2 - x1, 1);
+    };
+    // Corners + midpoints
+    const corners = [
+      [px, py],          [px + pw / 2, py],          [px + pw, py],
+      [px, py + ph],     [px + pw / 2, py + ph],     [px + pw, py + ph],
+      [px, py + ph / 2], [px + pw, py + ph / 2],
+    ];
+    // Bottom rails (visible side facing camera)
+    drawRail(px, px + pw, py + ph - 2);
+    drawRail(px, px + pw, py + ph - 10);
+    // Left + right rails
+    ctx.fillStyle = PALETTE.timberHi;
+    ctx.fillRect(px - 1, py + 4, 3, ph - 8);
+    ctx.fillRect(px + pw - 2, py + 4, 3, ph - 8);
+    // Posts
+    for (const [cx, cy] of corners) drawPost(cx, cy);
+
+    // Hay bale (top-left)
+    const hbx = px + 8, hby = py + 10;
+    ctx.fillStyle = '#d4a840';
+    ctx.fillRect(hbx, hby, 22, 18);
+    ctx.fillStyle = '#b88828';
+    for (let i = 0; i < 3; i++) ctx.fillRect(hbx + 1, hby + 2 + i * 5, 20, 1);
+    ctx.fillStyle = '#e8c258';
+    ctx.fillRect(hbx, hby, 22, 2);
+    ctx.fillStyle = '#7a5818';
+    ctx.fillRect(hbx, hby + 18, 22, 1);
+
+    // Water trough (bottom-right)
+    const trx = px + pw - 36, tryy = py + ph - 22;
+    ctx.fillStyle = '#7a6a5a';
+    ctx.fillRect(trx, tryy, 28, 12);
+    ctx.fillStyle = '#5e4f40';
+    ctx.fillRect(trx, tryy + 10, 28, 2);
+    ctx.fillStyle = '#3aa0d0';
+    ctx.fillRect(trx + 2, tryy + 2, 24, 7);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(trx + 4, tryy + 3, 6, 1);
+    ctx.fillRect(trx + 16, tryy + 4, 4, 1);
+
+    // Animals
+    const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.001;
+    const cx = px + pw / 2, cy = py + ph / 2;
+    const animals = game.animals || [];
+
+    if (animals.length === 0) {
+      // Faint silhouette hint
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + 4, 10, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.40)';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('+ animal', cx, cy);
+    } else {
+      for (const a of animals) {
+        const seed = (a.id || 0) % 1000;
+        const wx = Math.sin(t * 0.4 + seed * 0.123) * (pw / 2 - 18);
+        const wy = Math.cos(t * 0.5 + seed * 0.197) * (ph / 2 - 18);
+        const bob = Math.sin(t * 4 + seed * 0.3) * 1.4;
+        this._drawAnimal(ctx, a.kind, cx + wx, cy + wy + bob);
+      }
+    }
+  }
+
+  _drawAnimal(ctx, kind, cx, cy) {
+    // Shadow under every animal
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 6, 9, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (kind === 'chicken') {
+      // Body
+      ctx.fillStyle = '#f4e070';
+      ctx.fillRect(cx - 5, cy - 2, 10, 8);
+      // Head bump
+      ctx.fillRect(cx + 1, cy - 6, 6, 5);
+      // Comb (red)
+      ctx.fillStyle = '#e02828';
+      ctx.fillRect(cx + 2, cy - 8, 2, 2);
+      ctx.fillRect(cx + 5, cy - 8, 2, 2);
+      // Beak
+      ctx.fillStyle = '#f08020';
+      ctx.fillRect(cx + 7, cy - 4, 2, 2);
+      // Eye
+      ctx.fillStyle = '#000';
+      ctx.fillRect(cx + 4, cy - 4, 1, 1);
+      // Wing
+      ctx.fillStyle = '#d4b840';
+      ctx.fillRect(cx - 3, cy, 5, 3);
+      // Feet
+      ctx.fillStyle = '#c06020';
+      ctx.fillRect(cx - 2, cy + 6, 1, 1);
+      ctx.fillRect(cx + 2, cy + 6, 1, 1);
+
+    } else if (kind === 'cow') {
+      // Body (white)
+      ctx.fillStyle = '#f0f0e8';
+      ctx.fillRect(cx - 8, cy - 3, 16, 9);
+      // Black patches
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(cx - 7, cy - 2, 4, 3);
+      ctx.fillRect(cx + 2, cy + 1, 5, 3);
+      // Head
+      ctx.fillStyle = '#f0f0e8';
+      ctx.fillRect(cx + 6, cy - 5, 6, 6);
+      // Snout (pink)
+      ctx.fillStyle = '#e8a8a0';
+      ctx.fillRect(cx + 10, cy - 1, 3, 3);
+      // Eye
+      ctx.fillStyle = '#000';
+      ctx.fillRect(cx + 8, cy - 3, 1, 1);
+      // Horn
+      ctx.fillStyle = '#d8c8a8';
+      ctx.fillRect(cx + 6, cy - 6, 1, 2);
+      // Udder dot
+      ctx.fillStyle = '#e890a0';
+      ctx.fillRect(cx - 1, cy + 5, 2, 2);
+      // Legs
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(cx - 6, cy + 6, 2, 2);
+      ctx.fillRect(cx + 4, cy + 6, 2, 2);
+
+    } else if (kind === 'sheep') {
+      // Cloud-shape body (3 overlapping fluffs)
+      ctx.fillStyle = '#f0ece4';
+      ctx.beginPath(); ctx.arc(cx - 5, cy, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy - 2, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + 5, cy, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx - 2, cy + 3, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + 3, cy + 3, 4, 0, Math.PI * 2); ctx.fill();
+      // Head (grey)
+      ctx.fillStyle = '#383028';
+      ctx.fillRect(cx + 6, cy - 2, 5, 5);
+      // Eye
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx + 8, cy - 1, 1, 1);
+      // Legs
+      ctx.fillStyle = '#383028';
+      ctx.fillRect(cx - 4, cy + 6, 2, 2);
+      ctx.fillRect(cx + 3, cy + 6, 2, 2);
+    }
   }
 
   _drawNpc(ctx, px, py, accent) {
@@ -1642,8 +1985,14 @@ export class Renderer {
     const hairColors = ['#3a2010', '#8b5e2c', '#c8a040', '#2a2040'];
     const hairColor = hairColors[hairVariant];
 
-    // Arm animation: slight offset based on tile position parity
-    const armAnim = (pr(px | 0, py | 0) % 2 === 0) ? 1 : 0;
+    // Idle animation: gentle vertical bob + arm sway, phase per-NPC so they don't sync
+    const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.001;
+    const phase = (accentN % 100) * 0.06;
+    const bob = Math.round(Math.sin(t * 1.6 + phase) * 1.2);
+    const armAnim = Math.round(Math.sin(t * 1.4 + phase + 0.7) * 1.5);
+    // Blink: closed eyes once every ~3 seconds
+    const blinkCycle = (t * 0.6 + phase) % 1;
+    const blinking = blinkCycle < 0.04;
 
     // Shadow
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
@@ -1662,6 +2011,10 @@ export class Renderer {
     ctx.fillStyle = '#404e7a';
     ctx.fillRect(px + 16, py + 31, 2, 9);
     ctx.fillRect(px + 26, py + 31, 2, 9);
+
+    // ── Upper body bobs gently ─────────────────────────────────────────────
+    ctx.save();
+    ctx.translate(0, bob);
 
     // Body (shirt / jacket)
     ctx.fillStyle = accent;
@@ -1704,20 +2057,27 @@ export class Renderer {
     ctx.fillStyle = this._lighten(hairColor, 25);
     ctx.fillRect(px + 11, py + 2, 14, 2);
 
-    // Eyes
-    ctx.fillStyle = '#222';
-    ctx.fillRect(px + 17, py + 10, 4, 4);
-    ctx.fillRect(px + 27, py + 10, 4, 4);
-    // White eye glints
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(px + 18, py + 10, 1, 1);
-    ctx.fillRect(px + 28, py + 10, 1, 1);
+    // Eyes — blink occasionally (closed = thin horizontal line)
+    if (blinking) {
+      ctx.fillStyle = '#222';
+      ctx.fillRect(px + 17, py + 12, 4, 1);
+      ctx.fillRect(px + 27, py + 12, 4, 1);
+    } else {
+      ctx.fillStyle = '#222';
+      ctx.fillRect(px + 17, py + 10, 4, 4);
+      ctx.fillRect(px + 27, py + 10, 4, 4);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px + 18, py + 10, 1, 1);
+      ctx.fillRect(px + 28, py + 10, 1, 1);
+    }
 
     // Slight smile
     ctx.fillStyle = '#c07050';
     ctx.fillRect(px + 18, py + 16, 9, 2);
     ctx.fillRect(px + 17, py + 15, 2, 2);
     ctx.fillRect(px + 26, py + 15, 2, 2);
+
+    ctx.restore();
   }
 
   // Returns the NPC under a screen point (for tap-to-talk), or null.

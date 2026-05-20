@@ -16,14 +16,14 @@ export const BUILDINGS = [
       'Heard stormy weather gives a bonus yield?',
       'Crafted goods fetch more than raw crops!',
     ]}},
-  { id: 'barn',     action: 'barn',     icon: '🐄', label: 'Barn',     color: '#b5552f', x: -3, y: -4, w: 2, h: 2,
+  { id: 'barn',     action: 'barn',     icon: '🐄', label: 'Barn',     color: '#a44030', x: -3, y: -4, w: 2, h: 2,
     npc: { x: -3, y: -2, name: 'Rancher', lines: [
       'Don\'t forget to feed your animals every day!',
       'A happy cow gives the richest milk.',
       'Wool season\'s coming — shear those sheep!',
       'A fed animal is a productive animal.',
     ]}},
-  { id: 'home',     action: 'home',     icon: '🏠', label: 'Home',     color: '#d4a86a', x:  0, y: -4, w: 2, h: 2,
+  { id: 'home',     action: 'home',     icon: '🏠', label: 'Home',     color: '#dcc090', x:  0, y: -4, w: 2, h: 2,
     npc: { x:  0, y: -2, name: 'Neighbor', lines: [
       'Home sweet home — decorate however you like!',
       'A fireplace really warms the place up.',
@@ -59,6 +59,13 @@ export const BUILDINGS = [
       'Word is someone caught a Golden Fish recently...',
     ]}},
 ];
+
+// Fenced animal yard adjacent to the Barn. Animals the player owns appear here
+// and wander visibly so the farm feels alive without entering a menu.
+// Coords are world tiles (same space as BUILDINGS); footprint = w×h tiles.
+export const ANIMAL_PEN = {
+  x: -2, y: -2, w: 2, h: 2,
+};
 
 export const FARM_SIZES = [
   { id: 1, cols: 10, rows: 8,  name: 'Starter Plot', coinCost: 0,     gemCost: 0   },

@@ -6,7 +6,7 @@ import {
   FISH,
   QUESTS,
   DAY_MS, OFFLINE_DAY_CAP,
-  WORLD_PAD, BUILDINGS,
+  WORLD_PAD, BUILDINGS, ANIMAL_PEN,
   STARTING_ENERGY, MAX_ENERGY,
   SEASON_CROP_PRICES,
 } from './constants.js';
@@ -88,11 +88,14 @@ export class Game {
     };
   }
 
-  // True if (tx,ty) is inside any building footprint (non-walkable).
+  // True if (tx,ty) is inside any building footprint or the animal pen
+  // (both non-walkable).
   isBlockedTile(tx, ty) {
     for (const b of BUILDINGS) {
       if (tx >= b.x && tx < b.x + b.w && ty >= b.y && ty < b.y + b.h) return true;
     }
+    const p = ANIMAL_PEN;
+    if (tx >= p.x && tx < p.x + p.w && ty >= p.y && ty < p.y + p.h) return true;
     return false;
   }
 
