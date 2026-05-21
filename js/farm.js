@@ -94,7 +94,7 @@ export class Farm {
 
   // Called every frame — advances real-time crop growth.
   // autoWater = true (Auto-Drip tool) keeps every crop perpetually watered.
-  tick(dt, autoWater = false) {
+  tick(dt, autoWater = false, growthFactorFor = null) {
     const now = Date.now();
     for (let y = 0; y < this.rows; y++) {
       for (let x = 0; x < this.cols; x++) {
@@ -109,9 +109,11 @@ export class Farm {
         } else if (!crop.isDry && (now - crop.lastWateredAt) > def.waterIntervalMs) {
           crop.isDry = true;
         }
-        if (!crop.isDry) {
-          crop.totalGrownMs = Math.min(def.growMs, crop.totalGrownMs + dt);
-        }
+        // Season factor (off-season = slower) × drought factor (dry = slower,
+        // not frozen). Watering clears isDry and restores full speed.
+        let factor = growthFactorFor ? growthFactorFor(crop.kind) : 1;
+        if (crop.isDry) factor *= 0.35;   // dry crops crawl instead of fully stalling
+        crop.totalGrownMs = Math.min(def.growMs, crop.totalGrownMs + dt * factor);
         const p = crop.totalGrownMs / def.growMs;
         crop.stage = p >= 1 ? 3 : Math.floor(p * 3);
       }

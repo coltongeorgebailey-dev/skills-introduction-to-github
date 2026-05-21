@@ -287,16 +287,15 @@ function useTool(tx, ty) {
     didAct = true;
   } else if (player.tool === 'seed') {
     const kind = player.selectedSeed;
-    if (!game.canPlantCrop(kind)) {
-      ui.notify(`Can't plant ${CROPS[kind]?.label || kind} this season!`);
-      return;
-    }
     if ((game.seedInventory[kind] || 0) > 0) {
       if (farm.plant(tx, ty, kind)) {
         game.seedInventory[kind]--;
         audio.playPlant();
         particles.emit(px, py, 'plant');
         didAct = true;
+        if (!game.isInSeason(kind)) {
+          ui.notify(`🌱 ${CROPS[kind].label} is out of season — slower growth & lower yield.`);
+        }
       } else {
         ui.notify('Tile must be tilled first!');
       }
@@ -388,7 +387,8 @@ function openProgressionModal() {
       onStartCraft: (slot, recipe) => game.startCraft(slot, recipe),
       onCollect: (slot) => game.collectCraft(slot),
       onUnlockSlot: () => game.unlockExtraCraftSlot(),
-    }
+    },
+    (tier, gems) => game.unlockStamina(tier, gems),
   );
 }
 
@@ -454,7 +454,7 @@ function syncToolBar() {
   syncSeedCarousel();
 }
 
-const CROP_ICONS = { wheat: '🌾', tomato: '🍅', corn: '🌽', pumpkin: '🎃', parsnip: '🥕', golden_wheat: '✨' };
+const CROP_ICONS = { wheat: '🌾', tomato: '🍅', corn: '🌽', pumpkin: '🎃', parsnip: '🥕', potato: '🥔', strawberry: '🍓', melon: '🍈', blueberry: '🫐', grapes: '🍇', cabbage: '🥬', golden_wheat: '✨' };
 
 function syncSeedCarousel() {
   const carousel = document.getElementById('seed-carousel');

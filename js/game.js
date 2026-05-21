@@ -7,7 +7,7 @@ import {
   QUESTS,
   DAY_MS, OFFLINE_DAY_CAP,
   WORLD_PAD, BUILDINGS,
-  STARTING_ENERGY, MAX_ENERGY,
+  STARTING_ENERGY, MAX_ENERGY, STAMINA_TIERS,
   SEASON_CROP_PRICES,
 } from './constants.js';
 import { Farm } from './farm.js';
@@ -29,10 +29,16 @@ export class Game {
     this.houseSkin = 'classic';
 
     // Crop inventories
-    this.seedInventory     = { wheat: 5, tomato: 2, corn: 0, pumpkin: 0, parsnip: 0, golden_wheat: 0 };
-    this.harvestInventory  = { wheat: 0, tomato: 0, corn: 0, pumpkin: 0, parsnip: 0, golden_wheat: 0 };
+    this.seedInventory     = { ...Object.fromEntries(Object.keys(CROPS).map(k => [k, 0])), wheat: 5, tomato: 2 };
+    this.harvestInventory  = Object.fromEntries(Object.keys(CROPS).map(k => [k, 0]));
 
-    // Energy / stamina (resets each day)
+    // Time of day, 0..1 (0=midnight, 0.25=6AM, 0.5=noon, 0.75=6PM). Starts at
+    // sunrise; drives the day/night lighting overlay and HUD sun/moon icon.
+    this.timeOfDay = 5 / 24;
+
+    // Energy / stamina (resets each day). staminaTier controls maxEnergy and
+    // is upgraded at the Upgrades shop (see unlockStamina + STAMINA_TIERS).
+    this.staminaTier = 1;
     this.energy    = STARTING_ENERGY;
     this.maxEnergy = MAX_ENERGY;
 
@@ -43,6 +49,7 @@ export class Game {
 
     // Animals
     this.animals = [];
+    this._nextAnimalId = 1;
     this.feedBags = 10;
     this.animalProducts = { egg: 0, milk: 0, wool: 0 };
 
@@ -140,13 +147,20 @@ export class Game {
 
   currentSeasonName() { return SEASONS[this.season]; }
 
-  canPlantCrop(kind) {
-    if (this.currentSeasonName() === 'Winter') return false;
+  // Any valid crop can be planted in any season now — off-season just grows
+  // slower & yields less (see isInSeason / cropGrowthFactor / addHarvest).
+  canPlantCrop(kind) { return !!CROPS[kind]; }
+
+  // True if the crop is in its preferred season (full speed & yield).
+  isInSeason(kind) {
     const def = CROPS[kind];
     if (!def) return false;
-    if (!def.seasons) return true;
+    if (!def.seasons) return true;            // wheat, golden_wheat = always in-season
     return def.seasons.includes(this.currentSeasonName());
   }
+
+  // Growth-rate multiplier applied per frame to growing crops (off-season = half speed).
+  cropGrowthFactor(kind) { return this.isInSeason(kind) ? 1 : 0.5; }
 
   _rollWeather() {
     const total = WEATHER_TYPES.reduce((s, w) => s + w.weight, 0);
@@ -177,7 +191,7 @@ export class Game {
   // Crops grow continuously; a game day passes every DAY_MS of real time,
   // which drives seasons, weather, animals, crafting and quests.
   tick(dt) {
-    this.farm.tick(dt, this._autoWaterActive());
+    this.farm.tick(dt, this._autoWaterActive(), (kind) => this.cropGrowthFactor(kind));
 
     this._dayAccumulatorMs += dt;
     let guard = 0;
@@ -186,6 +200,10 @@ export class Game {
       this._advanceGameDay();
       guard++;
     }
+
+    // Time-of-day clock: 0=midnight, 0.25=6AM, 0.5=noon, 0.75=6PM. The game day
+    // starts at sunrise (5/24), so the visible cycle runs sunrise→noon→dusk→night.
+    this.timeOfDay = (5 / 24 + this.dayProgress()) % 1;
 
     // Quest progress re-checked ~1×/sec so real-time goals complete live
     this._questAccumulatorMs += dt;
@@ -227,6 +245,7 @@ export class Game {
   // Manual "skip ahead" button — fast-forwards to the next day immediately
   sleepToNextDay() {
     this._dayAccumulatorMs = 0;
+    this.timeOfDay = 5 / 24;   // wake at sunrise
     this._advanceGameDay();
   }
 
@@ -272,9 +291,12 @@ export class Game {
     const bonus = weatherDef.yieldBonus || 0;
     const bonusApplied = {};
     for (const [kind, count] of Object.entries(harvested)) {
+      // Off-season harvests yield less (70%, but never zero)
+      const seasonMul = this.isInSeason(kind) ? 1 : 0.7;
+      const base = Math.max(1, Math.round(count * seasonMul));
       // Weather yield bonus: extra crops dropped on rainy/stormy days
-      const extra = bonus > 0 ? Math.floor(count * bonus) : 0;
-      const finalCount = count + extra;
+      const extra = bonus > 0 ? Math.floor(base * bonus) : 0;
+      const finalCount = base + extra;
       this.harvestInventory[kind] = (this.harvestInventory[kind] || 0) + finalCount;
       this.milestones.cropsGrownByKind[kind] = (this.milestones.cropsGrownByKind[kind] || 0) + finalCount;
       total += finalCount;
@@ -325,6 +347,26 @@ export class Game {
     return true;
   }
 
+  // Buy the next Stamina tier — raises maxEnergy and tops the player off so the
+  // purchase feels instantly useful (rather than waiting until tomorrow).
+  unlockStamina(tier, useGems = false) {
+    const entry = STAMINA_TIERS.find(t => t.tier === tier);
+    if (!entry) return false;
+    if (tier <= this.staminaTier) return false;
+    if (useGems) {
+      if (this.gems < entry.unlockGems) return false;
+      this.gems -= entry.unlockGems;
+    } else {
+      if (this.coins < entry.unlockCoins) return false;
+      this.coins -= entry.unlockCoins;
+    }
+    this.staminaTier = tier;
+    this.maxEnergy   = entry.maxEnergy;
+    this.energy      = entry.maxEnergy;   // instant top-off
+    this.autoSave();
+    return true;
+  }
+
   buySkin(skinId, category) {
     if (this.ownedSkins.includes(skinId)) return false;
     const list = SKINS[category];
@@ -349,7 +391,7 @@ export class Game {
     const def = ANIMALS[kind];
     if (!def || this.coins < def.cost) return false;
     this.coins -= def.cost;
-    this.animals.push({ id: Date.now(), kind, name: def.name, fed: false, unhappyDays: 0 });
+    this.animals.push({ id: this._nextAnimalId++, kind, name: def.name, fed: false, unhappyDays: 0 });
     return true;
   }
 
@@ -535,7 +577,8 @@ export class Game {
       farmSizeId: this.farmSizeId, machineryTiers: this.machineryTiers,
       ownedSkins: this.ownedSkins, homeLayout: this.homeLayout, houseSkin: this.houseSkin,
       seedInventory: this.seedInventory, harvestInventory: this.harvestInventory,
-      energy: this.energy, maxEnergy: this.maxEnergy,
+      energy: this.energy, maxEnergy: this.maxEnergy, staminaTier: this.staminaTier,
+      timeOfDay: this.timeOfDay,
       season: this.season, seasonDay: this.seasonDay, weather: this.weather,
       animals: this.animals, feedBags: this.feedBags, animalProducts: this.animalProducts,
       craftingSlots: this.craftingSlots, artisanInventory: this.artisanInventory, craftingSlotsUnlocked: this.craftingSlotsUnlocked,
@@ -554,13 +597,21 @@ export class Game {
     g.farmSizeId = d.farmSizeId; g.machineryTiers = d.machineryTiers;
     g.ownedSkins = d.ownedSkins || ['default', 'classic'];
     g.homeLayout = d.homeLayout || []; g.houseSkin = d.houseSkin || 'classic';
-    // Merge saved inventories with defaults so new crops (parsnip) appear in old saves
-    g.seedInventory    = { parsnip: 0, ...d.seedInventory };
-    g.harvestInventory = { parsnip: 0, ...d.harvestInventory };
-    g.energy    = d.energy    ?? STARTING_ENERGY;
-    g.maxEnergy = d.maxEnergy ?? MAX_ENERGY;
+    // Merge saved inventories over a zero-filled map of ALL crops so any newly
+    // added crop automatically appears (at 0) in older saves.
+    const zeroInv = Object.fromEntries(Object.keys(CROPS).map(k => [k, 0]));
+    g.seedInventory    = { ...zeroInv, ...d.seedInventory };
+    g.harvestInventory = { ...zeroInv, ...d.harvestInventory };
+    g.timeOfDay = d.timeOfDay ?? (5 / 24);
+    g.staminaTier = d.staminaTier ?? 1;
+    const staminaEntry = STAMINA_TIERS.find(t => t.tier === g.staminaTier) || STAMINA_TIERS[0];
+    g.maxEnergy = d.maxEnergy ?? staminaEntry.maxEnergy;
+    g.energy    = d.energy    ?? g.maxEnergy;
     g.season = d.season || 0; g.seasonDay = d.seasonDay || 0; g.weather = d.weather || 'sunny';
     g.animals = d.animals || []; g.feedBags = d.feedBags ?? 10; g.animalProducts = d.animalProducts || { egg: 0, milk: 0, wool: 0 };
+    // Migrate old saves: re-assign unique sequential ids so feed lookups can't collide.
+    g._nextAnimalId = 1;
+    for (const a of g.animals) a.id = g._nextAnimalId++;
     g.craftingSlots = d.craftingSlots || [null, null]; g.artisanInventory = d.artisanInventory || {}; g.craftingSlotsUnlocked = d.craftingSlotsUnlocked || 1;
     g.fishInventory = d.fishInventory || {};
     g.completedQuests = d.completedQuests || []; g.claimedQuests = d.claimedQuests || [];

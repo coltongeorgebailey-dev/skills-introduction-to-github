@@ -1,4 +1,4 @@
-import { CROPS, FARM_SIZES, MACHINERY, SKINS, FURNITURE, GEM_PACKS, SEASONS, SEASON_ICONS, WEATHER_TYPES, ANIMALS, FEED_BAG_COST, RECIPES, EXTRA_CRAFT_SLOT_COST, FISH, QUESTS } from './constants.js';
+import { CROPS, FARM_SIZES, MACHINERY, STAMINA_TIERS, SKINS, FURNITURE, GEM_PACKS, SEASONS, SEASON_ICONS, WEATHER_TYPES, ANIMALS, FEED_BAG_COST, RECIPES, EXTRA_CRAFT_SLOT_COST, FISH, QUESTS } from './constants.js';
 
 export class UI {
   constructor() {
@@ -15,7 +15,12 @@ export class UI {
     const seasonEl = document.getElementById('hud-season');
     if (seasonEl) {
       const wDef = WEATHER_TYPES.find(w => w.id === game.weather) || WEATHER_TYPES[0];
-      seasonEl.textContent = `${SEASON_ICONS[game.season]} ${SEASONS[game.season]} ${wDef.icon} · D${game.seasonDay + 1}/7`;
+      const t = game.timeOfDay ?? 0.5;
+      const timeIcon = (t >= 0.18 && t < 0.30) ? '🌅'  // dawn (matches amber tint at sunrise)
+                     : (t >= 0.30 && t < 0.72) ? '☀️'  // day
+                     : (t >= 0.72 && t < 0.84) ? '🌇'  // dusk
+                     : '🌙';                            // night
+      seasonEl.textContent = `${SEASON_ICONS[game.season]} ${SEASONS[game.season]} ${wDef.icon} ${timeIcon} · D${game.seasonDay + 1}/7`;
     }
 
     // Energy bar
@@ -184,7 +189,7 @@ export class UI {
     const section = this._makeSection('Buy Seeds');
     Object.entries(CROPS).forEach(([kind, def]) => {
       const costStr = def.gemSeedCost !== null ? `${def.gemSeedCost} 💎` : `${def.seedCost} 🪙`;
-      const seasonHint = def.seasons ? def.seasons.join(' & ') : 'All seasons';
+      const seasonHint = def.seasons ? `Best in ${def.seasons.join(' & ')}` : 'Grows all year';
       const right = document.createElement('div');
       right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
       right.appendChild(this._makeCostBadge(costStr, def.gemSeedCost !== null));
@@ -290,7 +295,7 @@ export class UI {
 
   // ─── Progression Modal ────────────────────────────────────────────────────────
 
-  openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks) {
+  openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina) {
     const modal = this._openModal('modal-progression');
     modal.innerHTML = '';
 
@@ -310,11 +315,11 @@ export class UI {
       } else {
         right.appendChild(this._makeCostBadge(`${size.coinCost} 🪙`));
         right.appendChild(this._makeBtn('Buy', 'btn-primary', () => {
-          if (onUnlockFarm(size.id, false)) { this.notify(`Unlocked ${size.name}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks); }
+          if (onUnlockFarm(size.id, false)) { this.notify(`Unlocked ${size.name}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina); }
           else this.notify('Not enough coins!');
         }));
         right.appendChild(this._makeBtn(`${size.gemCost} 💎`, 'btn-gem', () => {
-          if (onUnlockFarm(size.id, true)) { this.notify(`Unlocked ${size.name}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks); }
+          if (onUnlockFarm(size.id, true)) { this.notify(`Unlocked ${size.name}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina); }
           else this.notify('Not enough gems!');
         }));
       }
@@ -336,11 +341,11 @@ export class UI {
         } else if (isNext) {
           right.appendChild(this._makeCostBadge(`${entry.unlockCoins} 🪙`));
           right.appendChild(this._makeBtn('Upgrade', 'btn-primary', () => {
-            if (onUnlockMachinery(toolKey, entry.tier, false)) { this.notify(`Upgraded to ${entry.name}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks); }
+            if (onUnlockMachinery(toolKey, entry.tier, false)) { this.notify(`Upgraded to ${entry.name}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina); }
             else this.notify('Not enough coins!');
           }));
           right.appendChild(this._makeBtn(`${entry.unlockGems} 💎`, 'btn-gem', () => {
-            if (onUnlockMachinery(toolKey, entry.tier, true)) { this.notify(`Upgraded to ${entry.name}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks); }
+            if (onUnlockMachinery(toolKey, entry.tier, true)) { this.notify(`Upgraded to ${entry.name}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina); }
             else this.notify('Not enough gems!');
           }));
         } else {
@@ -353,6 +358,37 @@ export class UI {
       });
     });
     body.appendChild(machSection);
+
+    // Stamina — raises maxEnergy. Mirrors the Machinery UI pattern.
+    if (onUnlockStamina) {
+      const stamSection = this._makeSection(`Stamina · ⚡${game.energy}/${game.maxEnergy}`);
+      STAMINA_TIERS.forEach(entry => {
+        const owned  = entry.tier <= (game.staminaTier || 1);
+        const isNext = entry.tier === (game.staminaTier || 1) + 1;
+        const right = document.createElement('div');
+        right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
+        if (owned) {
+          right.innerHTML = `<span class="owned-badge">✅</span>`;
+        } else if (isNext) {
+          right.appendChild(this._makeCostBadge(`${entry.unlockCoins} 🪙`));
+          right.appendChild(this._makeBtn('Upgrade', 'btn-primary', () => {
+            if (onUnlockStamina(entry.tier, false)) { this.notify(`Max energy raised to ${entry.maxEnergy}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina); }
+            else this.notify('Not enough coins!');
+          }));
+          right.appendChild(this._makeBtn(`${entry.unlockGems} 💎`, 'btn-gem', () => {
+            if (onUnlockStamina(entry.tier, true)) { this.notify(`Max energy raised to ${entry.maxEnergy}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina); }
+            else this.notify('Not enough gems!');
+          }));
+        } else {
+          right.appendChild(this._makeCostBadge(`${entry.unlockCoins} 🪙`));
+          const btn = this._makeBtn('Locked', 'btn-secondary', null);
+          btn.disabled = true;
+          right.appendChild(btn);
+        }
+        stamSection.appendChild(this._makeItemRow('⚡', entry.name, `Max energy: ${entry.maxEnergy}`, right));
+      });
+      body.appendChild(stamSection);
+    }
 
     // Crafting
     if (craftCallbacks) {
@@ -371,7 +407,7 @@ export class UI {
           detail = 'Locked';
           right.appendChild(this._makeCostBadge(`${EXTRA_CRAFT_SLOT_COST} 🪙`));
           right.appendChild(this._makeBtn('Unlock', 'btn-primary', () => {
-            if (onUnlockSlot()) { this.notify('Crafting slot unlocked!'); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks); }
+            if (onUnlockSlot()) { this.notify('Crafting slot unlocked!'); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina); }
             else this.notify('Not enough coins!');
           }));
         } else if (!slot) {
@@ -382,7 +418,7 @@ export class UI {
           name = `Slot ${i + 1}: ${recipe?.label}`;
           detail = '✅ Ready to collect!';
           right.appendChild(this._makeBtn('Collect', 'btn-collect', () => {
-            onCollect(i); this.notify(`Collected ${recipe?.label}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks);
+            onCollect(i); this.notify(`Collected ${recipe?.label}!`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina);
           }));
         } else {
           const recipe = RECIPES[slot.recipeKey];
@@ -402,7 +438,7 @@ export class UI {
         right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
         right.appendChild(this._makeCostBadge(`${recipe.sellPrice} 🪙`));
         const btn = this._makeBtn('Craft', 'btn-primary', () => {
-          if (onStartCraft(freeSlot, key)) { this.notify(`Crafting ${recipe.label}…`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks); }
+          if (onStartCraft(freeSlot, key)) { this.notify(`Crafting ${recipe.label}…`); this.openProgression(game, onUnlockFarm, onUnlockMachinery, craftCallbacks, onUnlockStamina); }
         });
         btn.disabled = !canCraft || freeSlot === -1;
         right.appendChild(btn);

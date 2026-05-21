@@ -1,4 +1,4 @@
-import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE, BUILDINGS } from './constants.js';
+import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE, BUILDINGS, VILLAGE_ARC } from './constants.js';
 
 // Deterministic pseudo-random per tile position
 function pr(x, y, s = 0) {
@@ -107,6 +107,10 @@ export class Renderer {
     // Fence
     this._drawFence(ctx, farm);
 
+    // Forest ring AFTER the fence so the tree canopies overlap fence posts,
+    // not the other way around (fixes "fence covering trees" at the bottom row).
+    this._drawForestRing(ctx, farm);
+
     // Only iterate tiles within the viewport (perf for large farms)
     const x0 = Math.max(0, Math.floor(farm.camX / TILE_SIZE));
     const y0 = Math.max(0, Math.floor(farm.camY / TILE_SIZE));
@@ -154,6 +158,7 @@ export class Renderer {
     // Atmosphere & lighting (screen space, over everything)
     this._drawClouds(ctx);
     this._drawSeasonOverlay(ctx, game.season);
+    this._drawDayNightOverlay(ctx, game.timeOfDay ?? 0.5);
     if (game.weather === 'rainy' || game.weather === 'stormy') {
       this._drawRainOverlay(ctx);
     }
@@ -397,7 +402,10 @@ export class Renderer {
     const rx = fw + 56;   // right wild strip
     const by = fh + 50;   // bottom wild strip
 
-    this._drawForestRing(ctx, farm);
+    // Village dirt path is ground terrain — draw it FIRST so trees/buildings render on top.
+    // (The forest ring is drawn AFTER the fence in _renderFarm so trees overlap the fence
+    // instead of the fence covering tree canopies.)
+    this._drawVillagePath(ctx);
 
     // Cottage = player's HOME (top of the right-side cluster).
     // Shed   = player's BARN (bottom). The animal pen sits in between
@@ -1257,8 +1265,7 @@ export class Renderer {
 
   _drawBuildings(ctx, game) {
     this._npcRects = [];
-    // Village dirt path connecting all the buildings (drawn under everything)
-    this._drawVillagePath(ctx);
+    // (Village dirt path is now drawn in _drawProps so trees render on top of it.)
     for (const b of BUILDINGS) {
       // Ground shadow under every building
       const bx = b.x * TILE_SIZE, by = b.y * TILE_SIZE;
@@ -1320,31 +1327,47 @@ export class Renderer {
   // ── Village dirt path ──────────────────────────────────────────────────────
 
   _drawVillagePath(ctx) {
-    // Wide horizontal dirt strip in front of all buildings (world tiles y=-1).
-    // Connects the leftmost building (Market x=-6) to the rightmost (Quests x=12+1).
-    const x0 = -7 * TILE_SIZE;
-    const x1 = 8 * TILE_SIZE;
-    const y0 = -1 * TILE_SIZE - 4;
-    const ph = 28;
-    ctx.fillStyle = '#a07848';
-    ctx.fillRect(x0, y0, x1 - x0, ph);
-    // Speckles
-    ctx.fillStyle = '#7e5a30';
-    for (let s = 0; s < 80; s++) {
-      const sx = x0 + ((s * 47 + 13) % (x1 - x0));
-      const sy = y0 + ((s * 19 + 7) % ph);
-      ctx.fillRect(sx, sy, 2, 1);
+    // Arc-shaped dirt path under the half-circle of shops. The shops' BUILDING
+    // CENTERS lie on a circle of radius VILLAGE_ARC.r around (cx,cy). We draw
+    // a thick brown ribbon along that circle from -π/2 (top) to +π/2 (bottom),
+    // then sprinkle speckles for texture.
+    const cx = VILLAGE_ARC.cx * TILE_SIZE; // arc center in pixels (VILLAGE_ARC.cx/cy is the abstract center in tile units)
+    const cy = VILLAGE_ARC.cy * TILE_SIZE;
+    const r  = VILLAGE_ARC.r * TILE_SIZE;
+    const width = 36; // ribbon thickness
+
+    // Base brown ribbon
+    ctx.strokeStyle = '#a07848';
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI, 2 * Math.PI);
+    ctx.stroke();
+
+    // Darker edge shadow (slightly thicker, drawn first underneath would be better;
+    // approximate by drawing two slim strokes at inner/outer edges)
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + width / 2 - 2, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r - width / 2 + 2, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+
+    // Speckles for dirt texture — points scattered along the arc, jittered radially
+    const N = 110;
+    for (let s = 0; s < N; s++) {
+      const t = s / (N - 1);
+      const ang = Math.PI + t * Math.PI;
+      const jitter = ((s * 53 + 17) % 100) / 100 - 0.5; // [-0.5..0.5]
+      const rj = r + jitter * (width - 8);
+      const sx = cx + Math.cos(ang) * rj + ((s * 31) % 5 - 2);
+      const sy = cy + Math.sin(ang) * rj + ((s * 19) % 5 - 2);
+      ctx.fillStyle = (s % 3 === 0) ? '#bc9060' : '#7e5a30';
+      ctx.fillRect(sx | 0, sy | 0, (s % 4 === 0) ? 2 : 1, 1);
     }
-    ctx.fillStyle = '#bc9060';
-    for (let s = 0; s < 50; s++) {
-      const sx = x0 + ((s * 31 + 5) % (x1 - x0));
-      const sy = y0 + ((s * 23 + 11) % ph);
-      ctx.fillRect(sx, sy, 1, 1);
-    }
-    // Top + bottom edge shadows
-    ctx.fillStyle = 'rgba(0,0,0,0.20)';
-    ctx.fillRect(x0, y0, x1 - x0, 2);
-    ctx.fillRect(x0, y0 + ph - 2, x1 - x0, 2);
+    ctx.lineCap = 'butt';
   }
 
   // ── Shared helpers ─────────────────────────────────────────────────────────
@@ -2280,6 +2303,34 @@ export class Renderer {
     ctx.fillRect(0, 0, this.w, this.h);
   }
 
+  // Full-screen day/night tint. timeOfDay 0..1 (0=midnight … 0.5=noon). Lerps
+  // between keyframes (wrapping at 1.0) for a smooth sunrise→noon→dusk→night cycle.
+  _drawDayNightOverlay(ctx, timeOfDay) {
+    // Each keyframe: [time, r, g, b, a]. Strong blue night, soft warm dawn/dusk,
+    // clear at noon. Keep night dark-but-readable per design (a ≤ 0.55).
+    const keys = [
+      [0.00,   8,  12,  48, 0.55],  // midnight — deep blue
+      [0.21, 255, 150,  70, 0.18],  // sunrise  — warm amber
+      [0.50,   0,   0,   0, 0.00],  // noon     — clear
+      [0.78, 255, 110,  40, 0.22],  // dusk     — orange
+      [1.00,   8,  12,  48, 0.55],  // wraps back to midnight
+    ];
+    const t = ((timeOfDay % 1) + 1) % 1;
+    let a = keys[0], b = keys[keys.length - 1];
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (t >= keys[i][0] && t <= keys[i + 1][0]) { a = keys[i]; b = keys[i + 1]; break; }
+    }
+    const span = b[0] - a[0] || 1;
+    const f = (t - a[0]) / span;
+    const r = Math.round(a[1] + (b[1] - a[1]) * f);
+    const g = Math.round(a[2] + (b[2] - a[2]) * f);
+    const bl = Math.round(a[3] + (b[3] - a[3]) * f);
+    const al = a[4] + (b[4] - a[4]) * f;
+    if (al <= 0.001) return;
+    ctx.fillStyle = `rgba(${r},${g},${bl},${al.toFixed(3)})`;
+    ctx.fillRect(0, 0, this.w, this.h);
+  }
+
   _drawRainOverlay(ctx) {
     const t = (this._timestamp || 0) / 40;
     ctx.strokeStyle = 'rgba(150,200,255,0.35)';
@@ -2311,9 +2362,7 @@ export class Renderer {
     const rx = TILE_SIZE * 2, ry = TILE_SIZE * 1.2;
     const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.001;
 
-    // Soft ground shadow under the pond
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    ctx.beginPath(); ctx.ellipse(cx, cy + ry + 4, rx + 10, 8, 0, 0, Math.PI * 2); ctx.fill();
+    // (Pond shadow removed per user request.)
 
     // ── Sandy / muddy shore (wide, darker ring around the water) ───────────
     ctx.fillStyle = '#a78550';
@@ -2421,9 +2470,10 @@ export class Renderer {
       ctx.fillRect(rxp | 0, ryp - 22 | 0, 1, 4);
     });
 
-    // ── Small wooden dock on the south-west shore ──────────────────────────
-    const dockX = cx - rx + 6, dockY = cy + ry * 0.3;
-    const dockW = 28, dockH = 12;
+    // ── Small wooden dock sitting on the south shore (outside the water) ───
+    const dockW = 32, dockH = 10;
+    const dockX = cx - dockW / 2;
+    const dockY = cy + ry + 8;          // below the water + shore ring
     ctx.fillStyle = 'rgba(0,0,0,0.30)';
     ctx.fillRect(dockX, dockY + dockH, dockW, 3);
     // Planks

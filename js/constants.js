@@ -1,7 +1,7 @@
 export const TILE_SIZE = 48;
 
 // Walkable wild space (in tiles) around the farm fence on every side.
-export const WORLD_PAD = 7;
+export const WORLD_PAD = 20;
 
 // Buildings live outside the fence in the wild band. The player walks up to
 // the NPC (stationed one tile below the building's door) and talks to enter.
@@ -11,38 +11,43 @@ export const WORLD_PAD = 7;
 // The player's own Home and Barn live on the RIGHT side of the farm (drawn via
 // _drawCottage / _drawShed in _drawProps) and have no NPC — see Game.homeHotspot
 // and Game.barnHotspot for their interaction zones.
+// Shops are laid out along a HALF-CIRCLE arc to the right of the player's
+// cottage, forming an ARCH (∩) — peak at top, ends pointing down. Arc center
+// ≈ world tile (18, 5), radius 3 tiles, sweeping the TOP half of the circle
+// (angles π → 2π). Renderer draws a curved dirt path along the same arc.
+export const VILLAGE_ARC = { cx: 23, cy: 5, r: 6 };
 export const BUILDINGS = [
-  { id: 'market',   action: 'market',   icon: '🛒', label: 'Market',   color: '#c98a3a', x: -6, y: -4, w: 2, h: 2,
-    npc: { x: -6, y: -2, name: 'Shopkeep', lines: [
+  { id: 'market',   action: 'market',   icon: '🛒', label: 'Market',   color: '#c98a3a', x: 16, y:  4, w: 2, h: 2,
+    npc: { x: 16, y:  6, name: 'Shopkeep', lines: [
       'Welcome! Fresh seeds just arrived.',
       'Buy low, sell high — that\'s my motto!',
       'Pumpkins are always in demand in Fall.',
       'Heard stormy weather gives a bonus yield?',
       'Crafted goods fetch more than raw crops!',
     ]}},
-  { id: 'upgrades', action: 'upgrades', icon: '⭐', label: 'Upgrades', color: '#6a8fc9', x: -3, y: -4, w: 2, h: 2,
-    npc: { x: -3, y: -2, name: 'Engineer', lines: [
+  { id: 'upgrades', action: 'upgrades', icon: '⭐', label: 'Upgrades', color: '#6a8fc9', x: 18, y:  0, w: 2, h: 2,
+    npc: { x: 18, y:  2, name: 'Engineer', lines: [
       'Better tools mean less work, more harvest!',
       'The Auto-Drip system changed everything for me.',
       'The Tractor can till six tiles in one pass!',
       'Save up — the Tier 3 upgrades are worth every coin.',
     ]}},
-  { id: 'skins',    action: 'skins',    icon: '🎨', label: 'Skins',    color: '#b06ac9', x:  0, y: -4, w: 2, h: 2,
-    npc: { x:  0, y: -2, name: 'Tailor', lines: [
+  { id: 'skins',    action: 'skins',    icon: '🎨', label: 'Skins',    color: '#b06ac9', x: 22, y: -2, w: 2, h: 2,
+    npc: { x: 22, y:  0, name: 'Tailor', lines: [
       'Fancy a fresh new look?',
       'The Space Farmer suit is my personal favourite.',
       'Style matters even on the farm!',
       'New fabrics just in from the city!',
     ]}},
-  { id: 'gems',     action: 'gems',     icon: '💎', label: 'Gems',     color: '#3aa0c9', x:  3, y: -4, w: 2, h: 2,
-    npc: { x:  3, y: -2, name: 'Jeweler', lines: [
+  { id: 'gems',     action: 'gems',     icon: '💎', label: 'Gems',     color: '#3aa0c9', x: 26, y:  0, w: 2, h: 2,
+    npc: { x: 26, y:  2, name: 'Jeweler', lines: [
       'Gems — shiny, rare, and powerful!',
       'You earn a gem every day you log in.',
       'Golden Wheat seeds are only available for gems.',
       'Gems can speed up any farm expansion.',
     ]}},
-  { id: 'quests',   action: 'quests',   icon: '📜', label: 'Quests',   color: '#c9b03a', x:  6, y: -4, w: 2, h: 2,
-    npc: { x:  6, y: -2, name: 'Mayor', lines: [
+  { id: 'quests',   action: 'quests',   icon: '📜', label: 'Quests',   color: '#c9b03a', x: 28, y:  4, w: 2, h: 2,
+    npc: { x: 28, y:  6, name: 'Mayor', lines: [
       'The town needs your help — check the board!',
       'Complete quests to earn coins and gems.',
       'A true Farm Legend reaches Day 100!',
@@ -65,6 +70,12 @@ export const CROPS = {
   corn:         { label: 'Corn',         daysToGrow: 7,  seedCost: 15,  sellPrice: 60,  gemSeedCost: null, color: '#f0d050', darkColor: '#c8a800', seasons: ['Summer','Fall'],  growMs: 420000,  waterIntervalMs: 120000 },
   pumpkin:      { label: 'Pumpkin',      daysToGrow: 10, seedCost: 20,  sellPrice: 105, gemSeedCost: null, color: '#e87820', darkColor: '#b05010', seasons: ['Fall'],           growMs: 720000,  waterIntervalMs: 120000 },
   parsnip:      { label: 'Parsnip',      daysToGrow: 4,  seedCost: 8,   sellPrice: 22,  gemSeedCost: null, color: '#f0e0b0', darkColor: '#c8b060', seasons: ['Winter'],         growMs: 240000,  waterIntervalMs: 150000 },
+  potato:       { label: 'Potato',       daysToGrow: 4,  seedCost: 8,   sellPrice: 26,  gemSeedCost: null, color: '#c9a36b', darkColor: '#8f7038', seasons: ['Spring','Fall'],   growMs: 240000,  waterIntervalMs: 120000 },
+  strawberry:   { label: 'Strawberry',   daysToGrow: 5,  seedCost: 15,  sellPrice: 48,  gemSeedCost: null, color: '#e8506a', darkColor: '#b02838', seasons: ['Spring','Summer'], growMs: 300000,  waterIntervalMs: 120000 },
+  melon:        { label: 'Melon',        daysToGrow: 8,  seedCost: 22,  sellPrice: 90,  gemSeedCost: null, color: '#6cbf4a', darkColor: '#3f7d2c', seasons: ['Summer'],          growMs: 480000,  waterIntervalMs: 120000 },
+  blueberry:    { label: 'Blueberry',    daysToGrow: 6,  seedCost: 18,  sellPrice: 64,  gemSeedCost: null, color: '#4a78d8', darkColor: '#2c4d96', seasons: ['Summer','Fall'],   growMs: 360000,  waterIntervalMs: 120000 },
+  grapes:       { label: 'Grapes',       daysToGrow: 8,  seedCost: 24,  sellPrice: 95,  gemSeedCost: null, color: '#8a4fbf', darkColor: '#5e3486', seasons: ['Fall'],            growMs: 480000,  waterIntervalMs: 120000 },
+  cabbage:      { label: 'Cabbage',      daysToGrow: 5,  seedCost: 12,  sellPrice: 34,  gemSeedCost: null, color: '#a8d878', darkColor: '#6f9f3a', seasons: ['Winter'],          growMs: 300000,  waterIntervalMs: 150000 },
   golden_wheat: { label: 'Golden Wheat', daysToGrow: 2,  seedCost: 0,   sellPrice: 80,  gemSeedCost: 5,    color: '#ffe066', darkColor: '#d4a800', seasons: null,              growMs: 120000,  waterIntervalMs: 120000 },
 };
 
@@ -122,9 +133,9 @@ export const SEASON_DAYS = 7;
 export const SEASON_ICONS = ['🌸', '☀️', '🍂', '❄️'];
 
 export const WEATHER_TYPES = [
-  { id: 'sunny',  label: 'Sunny',  icon: '☀️',  weight: 50, autoWater: false, yieldBonus: 0    },
+  { id: 'sunny',  label: 'Sunny',  icon: '☀️',  weight: 45, autoWater: false, yieldBonus: 0    },
   { id: 'cloudy', label: 'Cloudy', icon: '⛅',  weight: 25, autoWater: false, yieldBonus: 0    },
-  { id: 'rainy',  label: 'Rainy',  icon: '🌧️', weight: 20, autoWater: true,  yieldBonus: 0.10 },
+  { id: 'rainy',  label: 'Rainy',  icon: '🌧️', weight: 25, autoWater: true,  yieldBonus: 0.10 },
   { id: 'stormy', label: 'Stormy', icon: '⛈️', weight: 5,  autoWater: true,  yieldBonus: 0.25 },
 ];
 
@@ -145,6 +156,12 @@ export const RECIPES = {
   cornmeal:     { label: 'Cornmeal',        input: 'corn',         qty: 3, days: 1, sellPrice: 210 },
   pie:          { label: 'Pumpkin Pie',     input: 'pumpkin',      qty: 2, days: 2, sellPrice: 245 },
   parsnip_stew: { label: 'Parsnip Stew',   input: 'parsnip',      qty: 3, days: 1, sellPrice: 90  },
+  fries:        { label: 'French Fries',    input: 'potato',       qty: 3, days: 1, sellPrice: 100 },
+  jam:          { label: 'Strawberry Jam',  input: 'strawberry',   qty: 3, days: 2, sellPrice: 185 },
+  juice:        { label: 'Melon Juice',     input: 'melon',        qty: 2, days: 1, sellPrice: 215 },
+  blueberry_pie:{ label: 'Blueberry Pie',   input: 'blueberry',    qty: 3, days: 2, sellPrice: 240 },
+  wine:         { label: 'Wine',            input: 'grapes',       qty: 3, days: 3, sellPrice: 360 },
+  sauerkraut:   { label: 'Sauerkraut',      input: 'cabbage',      qty: 3, days: 1, sellPrice: 135 },
   goldenbread:  { label: 'Gold Bread',      input: 'golden_wheat', qty: 5, days: 1, sellPrice: 440 },
 };
 export const EXTRA_CRAFT_SLOT_COST = 2000;
@@ -185,6 +202,14 @@ export const QUESTS = [
 export const STARTING_ENERGY = 20;
 export const MAX_ENERGY       = 20;
 
+// Stamina upgrade path — buy at the Upgrades shop to raise max energy.
+// Tier 1 is the default (no purchase). Each subsequent tier replaces maxEnergy.
+export const STAMINA_TIERS = [
+  { tier: 1, name: 'Hand Stamina',    maxEnergy: 20, unlockCoins: 0,    unlockGems: 0   },
+  { tier: 2, name: 'Hearty Stamina',  maxEnergy: 25, unlockCoins: 1000, unlockGems: 40  },
+  { tier: 3, name: 'Iron Stamina',    maxEnergy: 30, unlockCoins: 4000, unlockGems: 100 },
+];
+
 // ── Seasonal Market Pricing ───────────────────────────────────────────────────
 // Actual sell price = base sellPrice × multiplier for the current season.
 // High multiplier = that crop is scarce / in demand this season.
@@ -194,6 +219,12 @@ export const SEASON_CROP_PRICES = {
   corn:         { Spring: 1.3, Summer: 1.0, Fall: 1.0, Winter: 1.8 },
   pumpkin:      { Spring: 2.0, Summer: 1.5, Fall: 1.0, Winter: 2.5 },
   parsnip:      { Spring: 1.5, Summer: 1.3, Fall: 1.3, Winter: 1.0 },
+  potato:       { Spring: 1.0, Summer: 1.3, Fall: 1.0, Winter: 1.5 },
+  strawberry:   { Spring: 1.0, Summer: 1.2, Fall: 1.5, Winter: 1.8 },
+  melon:        { Spring: 1.4, Summer: 1.0, Fall: 1.3, Winter: 1.8 },
+  blueberry:    { Spring: 1.3, Summer: 1.0, Fall: 1.0, Winter: 1.6 },
+  grapes:       { Spring: 1.6, Summer: 1.3, Fall: 1.0, Winter: 2.0 },
+  cabbage:      { Spring: 1.4, Summer: 1.4, Fall: 1.2, Winter: 1.0 },
   golden_wheat: { Spring: 1.0, Summer: 1.0, Fall: 1.0, Winter: 1.0 },
 };
 
