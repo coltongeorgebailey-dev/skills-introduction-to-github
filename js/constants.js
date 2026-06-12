@@ -1,5 +1,10 @@
 export const TILE_SIZE = 48;
 
+// World render zoom — scales the whole farm view (player, crops, buildings) so
+// sprite detail (e.g. pants, crop growth stages) reads clearly. Applied via
+// ctx.scale in the renderer; all screen↔world conversions account for it.
+export const ZOOM = 1.5;
+
 // Walkable wild space (in tiles) around the farm fence on every side.
 export const WORLD_PAD = 20;
 
@@ -163,6 +168,10 @@ export const RECIPES = {
   wine:         { label: 'Wine',            input: 'grapes',       qty: 3, days: 3, sellPrice: 360 },
   sauerkraut:   { label: 'Sauerkraut',      input: 'cabbage',      qty: 3, days: 1, sellPrice: 135 },
   goldenbread:  { label: 'Gold Bread',      input: 'golden_wheat', qty: 5, days: 1, sellPrice: 440 },
+  // Multi-ingredient recipes (input/qty as arrays). Margin ≈ +15-25% over raw sum.
+  fruit_tart:    { label: 'Fruit Tart',     input: ['strawberry', 'blueberry'], qty: [2, 2], days: 2, sellPrice: 280 },
+  farm_stew:     { label: 'Farm Stew',      input: ['potato', 'cabbage'],       qty: [2, 2], days: 1, sellPrice: 150 },
+  harvest_feast: { label: 'Harvest Feast',  input: ['pumpkin', 'corn'],         qty: [1, 2], days: 2, sellPrice: 280 },
 };
 export const EXTRA_CRAFT_SLOT_COST = 2000;
 
@@ -196,6 +205,24 @@ export const QUESTS = [
   { id: 'q15', label: 'Farm Legend',     desc: 'Reach Day 100',                   reward: { coins: 1000, gems: 50 } },
 ];
 
+// ── Crop Quality ─────────────────────────────────────────────────────────────
+// Harvested crops roll a quality tier; higher tiers sell for more.
+export const QUALITY_MULT = { normal: 1, silver: 1.25, gold: 1.5 };
+
+// ── Achievements (collections & milestones) ──────────────────────────────────
+// Same shape as QUESTS (claimable for a reward). Conditions checked in
+// game._achievementMet().
+export const ACHIEVEMENTS = [
+  { id: 'a1', label: 'Botanist',       desc: 'Grow all 12 crop kinds',        reward: { gems: 75   } },
+  { id: 'a2', label: 'Aquarist',       desc: 'Catch all 5 fish kinds',        reward: { gems: 50   } },
+  { id: 'a3', label: 'Perfectionist',  desc: 'Harvest your first gold crop',  reward: { coins: 200 } },
+  { id: 'a4', label: 'Master Grower',  desc: 'Harvest 50 gold-star crops',    reward: { gems: 80   } },
+  { id: 'a5', label: 'Tycoon',         desc: 'Earn 10,000 coins total',       reward: { gems: 60   } },
+  { id: 'a6', label: 'Rancher',        desc: 'Own all 3 animal kinds',        reward: { coins: 400 } },
+  { id: 'a7', label: 'Artisan Master', desc: 'Craft 25 artisan goods',        reward: { gems: 20   } },
+  { id: 'a8', label: 'Well Rested',    desc: 'Reach max stamina',             reward: { coins: 300 } },
+];
+
 // ── Energy / Stamina ─────────────────────────────────────────────────────────
 
 // Each tool use costs 1 energy; fishing costs 2. Energy resets on sleep.
@@ -215,15 +242,15 @@ export const STAMINA_TIERS = [
 // High multiplier = that crop is scarce / in demand this season.
 export const SEASON_CROP_PRICES = {
   wheat:        { Spring: 1.5, Summer: 1.0, Fall: 1.0, Winter: 1.2 },
-  tomato:       { Spring: 1.0, Summer: 1.0, Fall: 1.4, Winter: 2.0 },
+  tomato:       { Spring: 1.0, Summer: 1.0, Fall: 1.4, Winter: 1.5 },
   corn:         { Spring: 1.3, Summer: 1.0, Fall: 1.0, Winter: 1.8 },
-  pumpkin:      { Spring: 2.0, Summer: 1.5, Fall: 1.0, Winter: 2.5 },
+  pumpkin:      { Spring: 2.0, Summer: 1.5, Fall: 1.0, Winter: 1.5 },
   parsnip:      { Spring: 1.5, Summer: 1.3, Fall: 1.3, Winter: 1.0 },
   potato:       { Spring: 1.0, Summer: 1.3, Fall: 1.0, Winter: 1.5 },
   strawberry:   { Spring: 1.0, Summer: 1.2, Fall: 1.5, Winter: 1.8 },
   melon:        { Spring: 1.4, Summer: 1.0, Fall: 1.3, Winter: 1.8 },
   blueberry:    { Spring: 1.3, Summer: 1.0, Fall: 1.0, Winter: 1.6 },
-  grapes:       { Spring: 1.6, Summer: 1.3, Fall: 1.0, Winter: 2.0 },
+  grapes:       { Spring: 1.6, Summer: 1.3, Fall: 1.0, Winter: 1.6 },
   cabbage:      { Spring: 1.4, Summer: 1.4, Fall: 1.2, Winter: 1.0 },
   golden_wheat: { Spring: 1.0, Summer: 1.0, Fall: 1.0, Winter: 1.0 },
 };

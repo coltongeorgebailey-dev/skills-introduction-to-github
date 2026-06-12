@@ -1,4 +1,4 @@
-import { CROPS, FARM_SIZES, MACHINERY, STAMINA_TIERS, SKINS, FURNITURE, GEM_PACKS, SEASONS, SEASON_ICONS, WEATHER_TYPES, ANIMALS, FEED_BAG_COST, RECIPES, EXTRA_CRAFT_SLOT_COST, FISH, QUESTS } from './constants.js';
+import { CROPS, FARM_SIZES, MACHINERY, STAMINA_TIERS, SKINS, FURNITURE, GEM_PACKS, SEASONS, SEASON_ICONS, WEATHER_TYPES, ANIMALS, FEED_BAG_COST, RECIPES, EXTRA_CRAFT_SLOT_COST, FISH, QUESTS, ACHIEVEMENTS } from './constants.js';
 
 export class UI {
   constructor() {
@@ -40,7 +40,7 @@ export class UI {
 
     const questBadge = document.getElementById('quest-badge');
     if (questBadge) {
-      const count = game.unclaimedQuestCount();
+      const count = game.unclaimedQuestCount() + (game.unclaimedAchievementCount?.() || 0);
       questBadge.textContent = count > 0 ? count : '';
       questBadge.style.display = count > 0 ? 'inline' : 'none';
     }
@@ -137,7 +137,8 @@ export class UI {
 
   // ─── Market Modal (tabbed) ────────────────────────────────────────────────────
 
-  openShop(game, onBuySeed, onSellCrop, initialTab = 'seeds') {
+  openShop(game, onBuySeed, onSellCrop, initialTab = 'seeds', afterSell = null) {
+    this._afterSell = afterSell;
     const modal = this._openModal('modal-shop');
     modal.innerHTML = '';
 
@@ -214,7 +215,8 @@ export class UI {
         right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
         right.appendChild(this._makeCostBadge(priceLabel || `${value} 🪙`));
         right.appendChild(this._makeBtn('Sell All', 'btn-primary', () => { onSell(); refresh(); }));
-        section.appendChild(this._makeItemRow(icon, label, `×${count}`, right));
+        const sub = typeof count === 'number' ? `×${count}` : count;
+        section.appendChild(this._makeItemRow(icon, label, sub, right));
       });
       wrap.appendChild(section);
     };
@@ -226,10 +228,13 @@ export class UI {
         const effectivePrice = game.effectiveSellPrice(kind);
         const isBoost = effectivePrice > def.sellPrice;
         const priceLabel = isBoost ? `${effectivePrice} 🪙 📈` : `${effectivePrice} 🪙`;
-        return { icon: '', label: def.label, count,
-          value: effectivePrice * count,
+        const q = game.cropQuality[kind] || { silver: 0, gold: 0 };
+        const stars = [q.gold ? `🥇${q.gold}` : '', q.silver ? `🥈${q.silver}` : ''].filter(Boolean).join(' ');
+        const countLabel = stars ? `×${count}  ${stars}` : `×${count}`;
+        return { icon: '', label: def.label, count: countLabel,
+          value: game.cropStackValue(kind),
           priceLabel,
-          onSell: () => { onSellCrop(kind, count); this.notify(`Sold ${count} ${def.label} for ${effectivePrice * count} 🪙!`); }};
+          onSell: () => { const earned = onSellCrop(kind, count); this.notify(`Sold ${count} ${def.label} for ${earned} 🪙!`); this._afterSell?.(); }};
       }));
 
     addSection('Artisan Goods', Object.entries(game.artisanInventory || {})
@@ -237,7 +242,7 @@ export class UI {
       .map(([key, count]) => {
         const recipe = RECIPES[key];
         return { icon: '🏺', label: recipe?.label || key, count, value: (recipe?.sellPrice || 0) * count,
-          onSell: () => { game.sellArtisan(key, count); this.notify(`Sold ${count} ${recipe?.label}!`); }};
+          onSell: () => { game.sellArtisan(key, count); this.notify(`Sold ${count} ${recipe?.label}!`); this._afterSell?.(); }};
       }));
 
     addSection('Animal Products', Object.entries(game.animalProducts || {})
@@ -247,7 +252,7 @@ export class UI {
         const icon = product === 'egg' ? '🥚' : product === 'milk' ? '🥛' : '🧶';
         const label = product.charAt(0).toUpperCase() + product.slice(1);
         return { icon, label, count, value: (animalDef?.productSell || 0) * count,
-          onSell: () => { game.sellAnimalProduct(product, count); this.notify(`Sold ${count} ${label}!`); }};
+          onSell: () => { game.sellAnimalProduct(product, count); this.notify(`Sold ${count} ${label}!`); this._afterSell?.(); }};
       }));
 
     addSection('Fish', Object.entries(game.fishInventory || {})
@@ -255,7 +260,7 @@ export class UI {
       .map(([kind, count]) => {
         const fishDef = FISH[kind];
         return { icon: '🐟', label: fishDef?.label || kind, count, value: (fishDef?.sellPrice || 0) * count,
-          onSell: () => { game.sellFish(kind, count); this.notify(`Sold ${count} ${fishDef?.label}!`); }};
+          onSell: () => { game.sellFish(kind, count); this.notify(`Sold ${count} ${fishDef?.label}!`); this._afterSell?.(); }};
       }));
 
     if (!hasItems) {
@@ -431,8 +436,10 @@ export class UI {
 
       const recipeSection = this._makeSection('Recipes');
       Object.entries(RECIPES).forEach(([key, recipe]) => {
-        const have = game.harvestInventory[recipe.input] || 0;
-        const canCraft = have >= recipe.qty;
+        // C.3: input/qty may be single (string/number) or array (multi-ingredient).
+        const inputs = Array.isArray(recipe.input) ? recipe.input : [recipe.input];
+        const qtys   = Array.isArray(recipe.qty)   ? recipe.qty   : [recipe.qty];
+        const canCraft = inputs.every((inp, i) => (game.harvestInventory[inp] || 0) >= qtys[i]);
         const freeSlot = game.craftingSlots.findIndex((s, idx) => s === null && idx < game.craftingSlotsUnlocked);
         const right = document.createElement('div');
         right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
@@ -442,8 +449,12 @@ export class UI {
         });
         btn.disabled = !canCraft || freeSlot === -1;
         right.appendChild(btn);
-        const inputName = CROPS[recipe.input]?.label || recipe.input;
-        recipeSection.appendChild(this._makeItemRow('🏺', recipe.label, `${recipe.qty}× ${inputName} · ${recipe.days}d · Have: ${have}`, right));
+        const ingredientStr = inputs.map((inp, i) => {
+          const have = game.harvestInventory[inp] || 0;
+          const name = CROPS[inp]?.label || inp;
+          return `${qtys[i]}× ${name} (have ${have})`;
+        }).join(' + ');
+        recipeSection.appendChild(this._makeItemRow('🏺', recipe.label, `${ingredientStr} · ${recipe.days}d`, right));
       });
       body.appendChild(recipeSection);
     }
@@ -560,18 +571,47 @@ export class UI {
 
   // ─── Quest Log ────────────────────────────────────────────────────────────────
 
-  openQuestLog(game, onClaim) {
+  openQuestLog(game, onClaim, onClaimAch, initialTab = 'quests') {
     const modal = this._openModal('modal-quests');
     modal.innerHTML = '';
 
     const closeFn = () => this._closeModal('modal-quests');
-    modal.appendChild(this._makeModalHeader('📜', 'Quests', closeFn));
+    modal.appendChild(this._makeModalHeader('📜', 'Town Board', closeFn));
 
-    const body = this._makeBody();
+    // Inner tab strip (Quests | Collection)
+    const tabs = document.createElement('div');
+    tabs.className = 'inner-tabs';
+    const tabDefs = [{ id: 'quests', label: '📜 Quests' }, { id: 'collection', label: '📚 Collection' }];
+    const content = document.createElement('div');
+    content.style.cssText = 'flex:1;overflow-y:auto;padding:12px 14px 16px;display:flex;flex-direction:column;gap:10px;';
 
+    let currentTab = initialTab;
+    const reopen = () => this.openQuestLog(game, onClaim, onClaimAch, currentTab);
+    const renderTab = (tabId) => {
+      currentTab = tabId;
+      content.innerHTML = '';
+      tabs.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+      if (tabId === 'quests') this._renderQuestList(content, game, onClaim, reopen);
+      else this._renderCollection(content, game, onClaimAch, reopen);
+    };
+
+    tabDefs.forEach(({ id, label }) => {
+      const btn = document.createElement('button');
+      btn.className = 'inner-tab' + (id === initialTab ? ' active' : '');
+      btn.dataset.tab = id;
+      btn.textContent = label;
+      btn.onclick = () => renderTab(id);
+      tabs.appendChild(btn);
+    });
+
+    modal.appendChild(tabs);
+    modal.appendChild(content);
+    renderTab(initialTab);
+  }
+
+  _renderQuestList(wrap, game, onClaim, reopen) {
     const readyIds = game.completedQuests;
     const claimedIds = game.claimedQuests;
-
     const claimable = QUESTS.filter(q => readyIds.includes(q.id) && !claimedIds.includes(q.id));
     const pending   = QUESTS.filter(q => !readyIds.includes(q.id) && !claimedIds.includes(q.id));
     const claimed   = QUESTS.filter(q => claimedIds.includes(q.id));
@@ -585,7 +625,7 @@ export class UI {
         right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
         if (!isClaimed && readyIds.includes(q.id)) {
           right.appendChild(this._makeBtn('Claim!', 'btn-collect', () => {
-            onClaim(q.id); this.notify(`Quest complete: ${q.label}!`); this.openQuestLog(game, onClaim);
+            onClaim(q.id); this.notify(`Quest complete: ${q.label}!`); reopen();
           }));
         } else {
           right.appendChild(this._makeCostBadge(rewardStr));
@@ -595,14 +635,69 @@ export class UI {
         if (isClaimed) row.style.opacity = '0.45';
         section.appendChild(row);
       });
-      body.appendChild(section);
+      wrap.appendChild(section);
     };
-
     addSection('Ready to Claim', claimable, false);
     addSection('In Progress', pending, false);
     addSection('Completed', claimed, true);
+  }
 
-    modal.appendChild(body);
+  _renderCollection(wrap, game, onClaimAch, reopen) {
+    const m = game.milestones;
+
+    // Crop collection
+    const cropKeys = Object.keys(CROPS);
+    const cropsFound = cropKeys.filter(k => (m.cropsGrownByKind[k] || 0) > 0).length;
+    const cropSec = this._makeSection(`Crops  ${cropsFound}/${cropKeys.length}`);
+    cropKeys.forEach(k => {
+      const grown = m.cropsGrownByKind[k] || 0;
+      const right = document.createElement('div');
+      right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
+      right.appendChild(this._makeCostBadge(grown > 0 ? `×${grown}` : '—'));
+      const row = this._makeItemRow(grown > 0 ? '✅' : '🔒', CROPS[k].label, grown > 0 ? 'Discovered' : 'Not yet grown', right);
+      if (grown === 0) row.style.opacity = '0.45';
+      cropSec.appendChild(row);
+    });
+    wrap.appendChild(cropSec);
+
+    // Fish collection
+    const fishKeys = Object.keys(FISH);
+    const fishFound = fishKeys.filter(k => (m.fishCaughtByKind[k] || 0) > 0).length;
+    const fishSec = this._makeSection(`Fish  ${fishFound}/${fishKeys.length}`);
+    fishKeys.forEach(k => {
+      const caught = m.fishCaughtByKind[k] || 0;
+      const right = document.createElement('div');
+      right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
+      right.appendChild(this._makeCostBadge(caught > 0 ? `×${caught}` : '—'));
+      const row = this._makeItemRow(caught > 0 ? '✅' : '🔒', FISH[k].label, caught > 0 ? 'Caught' : 'Not yet caught', right);
+      if (caught === 0) row.style.opacity = '0.45';
+      fishSec.appendChild(row);
+    });
+    wrap.appendChild(fishSec);
+
+    // Achievements
+    const readyIds = game.completedAchievements;
+    const claimedIds = game.claimedAchievements;
+    const achSec = this._makeSection('Achievements');
+    ACHIEVEMENTS.forEach(a => {
+      const isClaimed = claimedIds.includes(a.id);
+      const isReady = readyIds.includes(a.id) && !isClaimed;
+      const rewardStr = [a.reward.coins ? `${a.reward.coins} 🪙` : '', a.reward.gems ? `${a.reward.gems} 💎` : ''].filter(Boolean).join(' + ');
+      const right = document.createElement('div');
+      right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
+      if (isReady) {
+        right.appendChild(this._makeBtn('Claim!', 'btn-collect', () => {
+          onClaimAch(a.id); this.notify(`Achievement: ${a.label}!`); reopen();
+        }));
+      } else {
+        right.appendChild(this._makeCostBadge(rewardStr));
+      }
+      const icon = isClaimed ? '✅' : isReady ? '🎉' : '🔒';
+      const row = this._makeItemRow(icon, a.label, a.desc, right);
+      if (isClaimed) row.style.opacity = '0.45';
+      achSec.appendChild(row);
+    });
+    wrap.appendChild(achSec);
   }
 
   // ─── Barn Actions ─────────────────────────────────────────────────────────────
@@ -625,7 +720,10 @@ export class UI {
       const section = this._makeSection(`Animals · ${game.feedBags} feed bags`);
       game.animals.forEach(animal => {
         const def = ANIMALS[animal.kind];
-        const status = animal.fed ? '✅ Fed' : (animal.unhappyDays >= 2 ? '😢 Unhappy' : '😐 Hungry');
+        const cd = animal.productionCooldown || 0;
+        const status = cd > 0
+          ? `🩹 Recovering (${cd}d)`
+          : (animal.fed ? '✅ Fed' : (animal.unhappyDays >= 2 ? '😢 Unhappy' : '😐 Hungry'));
         const right = document.createElement('div');
         right.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
         if (!animal.fed) {

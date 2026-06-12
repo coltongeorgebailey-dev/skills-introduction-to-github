@@ -4,7 +4,7 @@ import {
   ANIMALS, FEED_BAG_COST,
   RECIPES, EXTRA_CRAFT_SLOT_COST,
   FISH,
-  QUESTS,
+  QUESTS, ACHIEVEMENTS, QUALITY_MULT,
   DAY_MS, OFFLINE_DAY_CAP,
   WORLD_PAD, BUILDINGS,
   STARTING_ENERGY, MAX_ENERGY, STAMINA_TIERS,
@@ -31,10 +31,18 @@ export class Game {
     // Crop inventories
     this.seedInventory     = { ...Object.fromEntries(Object.keys(CROPS).map(k => [k, 0])), wheat: 5, tomato: 2 };
     this.harvestInventory  = Object.fromEntries(Object.keys(CROPS).map(k => [k, 0]));
+    // Quality breakdown of harvested crops: { silver, gold } per kind (normal = total - silver - gold).
+    this.cropQuality       = Object.fromEntries(Object.keys(CROPS).map(k => [k, { silver: 0, gold: 0 }]));
 
     // Time of day, 0..1 (0=midnight, 0.25=6AM, 0.5=noon, 0.75=6PM). Starts at
     // sunrise; drives the day/night lighting overlay and HUD sun/moon icon.
     this.timeOfDay = 5 / 24;
+
+    // A.3 — set by main.js each frame; true while a modal is open or off the farm.
+    this.timePaused = false;
+
+    // B.3 — one-time tutorial nudges (saved so they don't repeat after reload).
+    this.tutorialFlags = { goldStar: false, achievement: false, offSeason: false };
 
     // Energy / stamina (resets each day). staminaTier controls maxEnergy and
     // is upgraded at the Upgrades shop (see unlockStamina + STAMINA_TIERS).
@@ -65,12 +73,17 @@ export class Game {
     this.completedQuests = [];  // quest ids that are ready to claim
     this.claimedQuests = [];    // quest ids already claimed
 
+    // Achievements (same claim model as quests)
+    this.completedAchievements = [];
+    this.claimedAchievements = [];
+
     // Milestones (extended)
     this.milestones = {
       totalHarvested: 0, daysPlayed: 0,
       rainyDays: 0, eggsCollected: 0, fishCaught: 0,
       crafted: 0, seasonsCompleted: 0, legendaryFish: 0,
-      cropsGrownByKind: {},
+      goldCropsHarvested: 0,
+      cropsGrownByKind: {}, fishCaughtByKind: {},
     };
 
     this.lastLoginDate = null;
@@ -191,25 +204,29 @@ export class Game {
   // Crops grow continuously; a game day passes every DAY_MS of real time,
   // which drives seasons, weather, animals, crafting and quests.
   tick(dt) {
+    // Crops grow even when the day-clock is paused — real-time growth contract.
     this.farm.tick(dt, this._autoWaterActive(), (kind) => this.cropGrowthFactor(kind));
 
-    this._dayAccumulatorMs += dt;
-    let guard = 0;
-    while (this._dayAccumulatorMs >= DAY_MS && guard < 100) {
-      this._dayAccumulatorMs -= DAY_MS;
-      this._advanceGameDay();
-      guard++;
+    // A.3: pause the day clock & time-of-day when a modal is open / off-farm view.
+    if (!this.timePaused) {
+      this._dayAccumulatorMs += dt;
+      let guard = 0;
+      while (this._dayAccumulatorMs >= DAY_MS && guard < 100) {
+        this._dayAccumulatorMs -= DAY_MS;
+        this._advanceGameDay();
+        guard++;
+      }
+      // Time-of-day clock: 0=midnight, 0.25=6AM, 0.5=noon, 0.75=6PM. The game day
+      // starts at sunrise (5/24), so the visible cycle runs sunrise→noon→dusk→night.
+      this.timeOfDay = (5 / 24 + this.dayProgress()) % 1;
     }
-
-    // Time-of-day clock: 0=midnight, 0.25=6AM, 0.5=noon, 0.75=6PM. The game day
-    // starts at sunrise (5/24), so the visible cycle runs sunrise→noon→dusk→night.
-    this.timeOfDay = (5 / 24 + this.dayProgress()) % 1;
 
     // Quest progress re-checked ~1×/sec so real-time goals complete live
     this._questAccumulatorMs += dt;
     if (this._questAccumulatorMs >= 1000) {
       this._questAccumulatorMs = 0;
       this.checkQuests();
+      this.checkAchievements();
     }
   }
 
@@ -239,6 +256,7 @@ export class Game {
     this._advanceCrafting();
     this._checkDailyLogin();
     this.checkQuests();
+    this.checkAchievements();
     this.autoSave();
   }
 
@@ -275,21 +293,61 @@ export class Game {
     return true;
   }
 
-  sellCrop(kind, count = 1) {
-    const def = CROPS[kind];
-    if (!def || (this.harvestInventory[kind] || 0) < count) return false;
-    this.harvestInventory[kind] -= count;
-    const earned = this.effectiveSellPrice(kind) * count;
-    this.coins += earned;
-    this.totalCoinsEarned += earned;
-    return true;
+  // Remove `count` crops, draining quality tiers. fromTop=true takes gold→silver→normal
+  // (selling, max value); fromTop=false takes normal→silver→gold (crafting, keep stars).
+  // Returns { gold, silver, normal } actually consumed.
+  _consumeQuality(kind, count, fromTop = false) {
+    const q = this.cropQuality[kind] || { silver: 0, gold: 0 };
+    const total = this.harvestInventory[kind] || 0;
+    const normal = Math.max(0, total - q.silver - q.gold);
+    let remaining = Math.min(count, total);
+    const taken = { gold: 0, silver: 0, normal: 0 };
+    const order = fromTop ? ['gold', 'silver', 'normal'] : ['normal', 'silver', 'gold'];
+    const avail = { gold: q.gold, silver: q.silver, normal };
+    for (const tier of order) {
+      const t = Math.min(remaining, avail[tier]);
+      taken[tier] = t; remaining -= t;
+      if (remaining <= 0) break;
+    }
+    q.gold -= taken.gold; q.silver -= taken.silver;
+    this.harvestInventory[kind] = total - (taken.gold + taken.silver + taken.normal);
+    return taken;
   }
 
-  addHarvest(harvested) {
+  sellCrop(kind, count = 1) {
+    const def = CROPS[kind];
+    if (!def || (this.harvestInventory[kind] || 0) < count) return 0;
+    const unit = this.effectiveSellPrice(kind);
+    const taken = this._consumeQuality(kind, count, true);   // sell best first
+    const earned = Math.round(unit * QUALITY_MULT.gold) * taken.gold
+                 + Math.round(unit * QUALITY_MULT.silver) * taken.silver
+                 + unit * taken.normal;
+    this.coins += earned;
+    this.totalCoinsEarned += earned;
+    this.checkAchievements();
+    return earned;
+  }
+
+  // Total coin value of the entire stack of `kind` (for market labels/messages).
+  cropStackValue(kind) {
+    const q = this.cropQuality[kind] || { silver: 0, gold: 0 };
+    const total = this.harvestInventory[kind] || 0;
+    const normal = Math.max(0, total - q.silver - q.gold);
+    const unit = this.effectiveSellPrice(kind);
+    return Math.round(unit * QUALITY_MULT.gold) * q.gold
+         + Math.round(unit * QUALITY_MULT.silver) * q.silver
+         + unit * normal;
+  }
+
+  addHarvest(harvested, wellTended = {}) {
     let total = 0;
+    let goldThisHarvest = 0;
+    let silverThisHarvest = 0;
     const weatherDef = this.currentWeatherDef();
     const bonus = weatherDef.yieldBonus || 0;
+    const wet = this.weather === 'rainy' || this.weather === 'stormy';
     const bonusApplied = {};
+    const qualityPerKind = {};   // B.1: { kind: { silver, gold } } for the harvest notify
     for (const [kind, count] of Object.entries(harvested)) {
       // Off-season harvests yield less (70%, but never zero)
       const seasonMul = this.isInSeason(kind) ? 1 : 0.7;
@@ -297,13 +355,37 @@ export class Game {
       // Weather yield bonus: extra crops dropped on rainy/stormy days
       const extra = bonus > 0 ? Math.floor(base * bonus) : 0;
       const finalCount = base + extra;
+
+      // Roll quality per unit: in-season crops (and wet days) produce more stars.
+      // D.1: "well-tended" crops (never let to dry) get an extra +5% gold chance,
+      // applied to the well-tended fraction of the harvest.
+      const inSeason = this.isInSeason(kind);
+      const baseGold   = 0.05 + (inSeason ? 0.10 : 0) + (wet ? 0.05 : 0);
+      const silverChance = 0.20 + (inSeason ? 0.10 : 0);
+      const wtFrac = count > 0 ? (wellTended[kind] || 0) / count : 0;
+      const wtUnits = Math.round(finalCount * wtFrac);   // first N units get the tended bonus
+      const q = this.cropQuality[kind] || (this.cropQuality[kind] = { silver: 0, gold: 0 });
+      const perKind = { silver: 0, gold: 0 };
+      for (let i = 0; i < finalCount; i++) {
+        const goldChance = baseGold + (i < wtUnits ? 0.05 : 0);
+        const r = Math.random();
+        if (r < goldChance) { q.gold++; perKind.gold++; goldThisHarvest++; }
+        else if (r < goldChance + silverChance) { q.silver++; perKind.silver++; silverThisHarvest++; }
+      }
+      qualityPerKind[kind] = perKind;
+
       this.harvestInventory[kind] = (this.harvestInventory[kind] || 0) + finalCount;
       this.milestones.cropsGrownByKind[kind] = (this.milestones.cropsGrownByKind[kind] || 0) + finalCount;
       total += finalCount;
       if (extra > 0) bonusApplied[kind] = extra;
     }
     this.milestones.totalHarvested += total;
+    this.milestones.goldCropsHarvested += goldThisHarvest;
     this._lastHarvestBonus = Object.keys(bonusApplied).length > 0 ? bonusApplied : null;
+    this._lastHarvestGold = goldThisHarvest;       // for harvest juice in main.js
+    this._lastHarvestSilver = silverThisHarvest;
+    this._lastHarvestQuality = qualityPerKind;     // for B.1 stars in harvest notify
+    this.checkAchievements();
     return total;
   }
 
@@ -417,11 +499,21 @@ export class Game {
   _collectAnimalProducts() {
     for (const animal of this.animals) {
       const def = ANIMALS[animal.kind];
+      animal.productionCooldown = animal.productionCooldown || 0;
       if (animal.fed) {
-        this.animalProducts[def.product] = (this.animalProducts[def.product] || 0) + 1;
-        this.milestones.eggsCollected++;
+        if (animal.productionCooldown > 0) {
+          // D.2: recovering from neglect — fed days count down the cooldown,
+          // but no product until it reaches 0.
+          animal.productionCooldown--;
+        } else {
+          this.animalProducts[def.product] = (this.animalProducts[def.product] || 0) + 1;
+          this.milestones.eggsCollected++;
+        }
       } else {
         animal.unhappyDays++;
+        // D.2: neglecting 3+ days sets a 2-day recovery cooldown — feeding alone
+        // won't immediately restore products; the animal has to recover first.
+        if (animal.unhappyDays >= 3) animal.productionCooldown = 2;
       }
       animal.fed = false;
     }
@@ -444,9 +536,15 @@ export class Game {
     if (this.craftingSlots[slotIdx] !== null) return false;
     const recipe = RECIPES[recipeKey];
     if (!recipe) return false;
-    const have = this.harvestInventory[recipe.input] || 0;
-    if (have < recipe.qty) return false;
-    this.harvestInventory[recipe.input] -= recipe.qty;
+    // C.3: input/qty may be a string or an array (multi-ingredient).
+    const inputs = Array.isArray(recipe.input) ? recipe.input : [recipe.input];
+    const qtys   = Array.isArray(recipe.qty)   ? recipe.qty   : [recipe.qty];
+    for (let i = 0; i < inputs.length; i++) {
+      if ((this.harvestInventory[inputs[i]] || 0) < qtys[i]) return false;
+    }
+    for (let i = 0; i < inputs.length; i++) {
+      this._consumeQuality(inputs[i], qtys[i], false);   // use normal crops first, keep stars
+    }
     this.craftingSlots[slotIdx] = { recipeKey, daysLeft: recipe.days };
     return true;
   }
@@ -495,7 +593,9 @@ export class Game {
   catchFish(kind) {
     this.fishInventory[kind] = (this.fishInventory[kind] || 0) + 1;
     this.milestones.fishCaught++;
+    this.milestones.fishCaughtByKind[kind] = (this.milestones.fishCaughtByKind[kind] || 0) + 1;
     if (kind === 'legendary') this.milestones.legendaryFish++;
+    this.checkAchievements();
   }
 
   sellFish(kind, count = 1) {
@@ -566,6 +666,52 @@ export class Game {
            this.machineryTiers.harvester >= 2; // harvester only has 2 tiers
   }
 
+  // ── Achievements (mirror the quest claim model) ─────────────────────────────
+
+  checkAchievements() {
+    const before = this.completedAchievements.length;
+    for (const a of ACHIEVEMENTS) {
+      if (this.claimedAchievements.includes(a.id) || this.completedAchievements.includes(a.id)) continue;
+      if (this._achievementMet(a)) this.completedAchievements.push(a.id);
+    }
+    // B.3 one-time tutorial: first achievement completion. Flagged here; main.js
+    // / ui.js show the toast when they update HUD next frame.
+    if (this.completedAchievements.length > before && !this.tutorialFlags.achievement) {
+      this.tutorialFlags.achievement = true;
+      this._pendingAchievementTutorial = true;
+    }
+  }
+
+  _achievementMet(a) {
+    const m = this.milestones;
+    switch (a.id) {
+      case 'a1': return Object.keys(CROPS).every(k => (m.cropsGrownByKind[k] || 0) > 0);
+      case 'a2': return Object.keys(FISH).every(k => (m.fishCaughtByKind[k] || 0) > 0);
+      case 'a3': return m.goldCropsHarvested >= 1;
+      case 'a4': return m.goldCropsHarvested >= 50;
+      case 'a5': return this.totalCoinsEarned >= 10000;
+      case 'a6': return ['chicken', 'cow', 'sheep'].every(k => this.animals.some(an => an.kind === k));
+      case 'a7': return m.crafted >= 25;
+      case 'a8': return this.staminaTier >= STAMINA_TIERS.length;
+      default: return false;
+    }
+  }
+
+  claimAchievement(id) {
+    if (!this.completedAchievements.includes(id) || this.claimedAchievements.includes(id)) return false;
+    const a = ACHIEVEMENTS.find(a => a.id === id);
+    if (!a) return false;
+    if (a.reward.coins) this.coins += a.reward.coins;
+    if (a.reward.gems)  this.gems  += a.reward.gems;
+    this.completedAchievements = this.completedAchievements.filter(i => i !== id);
+    this.claimedAchievements.push(id);
+    return true;
+  }
+
+  unclaimedAchievementCount() {
+    return this.completedAchievements.filter(id => !this.claimedAchievements.includes(id)).length;
+  }
+
   // ── Save / Load ───────────────────────────────────────────────────────────
 
   autoSave() { saveGame(this.serialize()); }
@@ -576,7 +722,7 @@ export class Game {
       day: this.day, coins: this.coins, gems: this.gems, totalCoinsEarned: this.totalCoinsEarned,
       farmSizeId: this.farmSizeId, machineryTiers: this.machineryTiers,
       ownedSkins: this.ownedSkins, homeLayout: this.homeLayout, houseSkin: this.houseSkin,
-      seedInventory: this.seedInventory, harvestInventory: this.harvestInventory,
+      seedInventory: this.seedInventory, harvestInventory: this.harvestInventory, cropQuality: this.cropQuality,
       energy: this.energy, maxEnergy: this.maxEnergy, staminaTier: this.staminaTier,
       timeOfDay: this.timeOfDay,
       season: this.season, seasonDay: this.seasonDay, weather: this.weather,
@@ -584,8 +730,10 @@ export class Game {
       craftingSlots: this.craftingSlots, artisanInventory: this.artisanInventory, craftingSlotsUnlocked: this.craftingSlotsUnlocked,
       fishInventory: this.fishInventory,
       completedQuests: this.completedQuests, claimedQuests: this.claimedQuests,
+      completedAchievements: this.completedAchievements, claimedAchievements: this.claimedAchievements,
       milestones: this.milestones, lastLoginDate: this.lastLoginDate,
       dayAccumulatorMs: this._dayAccumulatorMs, tutorialSeen: this.tutorialSeen,
+      tutorialFlags: this.tutorialFlags,
       farm: this.farm.serialize(),
       player: this.player.serialize(),
     };
@@ -602,6 +750,8 @@ export class Game {
     const zeroInv = Object.fromEntries(Object.keys(CROPS).map(k => [k, 0]));
     g.seedInventory    = { ...zeroInv, ...d.seedInventory };
     g.harvestInventory = { ...zeroInv, ...d.harvestInventory };
+    const zeroQ = Object.fromEntries(Object.keys(CROPS).map(k => [k, { silver: 0, gold: 0 }]));
+    g.cropQuality = { ...zeroQ, ...(d.cropQuality || {}) };
     g.timeOfDay = d.timeOfDay ?? (5 / 24);
     g.staminaTier = d.staminaTier ?? 1;
     const staminaEntry = STAMINA_TIERS.find(t => t.tier === g.staminaTier) || STAMINA_TIERS[0];
@@ -610,15 +760,18 @@ export class Game {
     g.season = d.season || 0; g.seasonDay = d.seasonDay || 0; g.weather = d.weather || 'sunny';
     g.animals = d.animals || []; g.feedBags = d.feedBags ?? 10; g.animalProducts = d.animalProducts || { egg: 0, milk: 0, wool: 0 };
     // Migrate old saves: re-assign unique sequential ids so feed lookups can't collide.
+    // Also default the D.2 productionCooldown so existing animals don't crash.
     g._nextAnimalId = 1;
-    for (const a of g.animals) a.id = g._nextAnimalId++;
+    for (const a of g.animals) { a.id = g._nextAnimalId++; a.productionCooldown ??= 0; }
     g.craftingSlots = d.craftingSlots || [null, null]; g.artisanInventory = d.artisanInventory || {}; g.craftingSlotsUnlocked = d.craftingSlotsUnlocked || 1;
     g.fishInventory = d.fishInventory || {};
     g.completedQuests = d.completedQuests || []; g.claimedQuests = d.claimedQuests || [];
-    g.milestones = { totalHarvested: 0, daysPlayed: 0, rainyDays: 0, eggsCollected: 0, fishCaught: 0, crafted: 0, seasonsCompleted: 0, legendaryFish: 0, cropsGrownByKind: {}, ...(d.milestones || {}) };
+    g.completedAchievements = d.completedAchievements || []; g.claimedAchievements = d.claimedAchievements || [];
+    g.milestones = { totalHarvested: 0, daysPlayed: 0, rainyDays: 0, eggsCollected: 0, fishCaught: 0, crafted: 0, seasonsCompleted: 0, legendaryFish: 0, goldCropsHarvested: 0, cropsGrownByKind: {}, fishCaughtByKind: {}, ...(d.milestones || {}) };
     g.lastLoginDate = d.lastLoginDate || null;
     g._dayAccumulatorMs = d.dayAccumulatorMs || 0;
     g.tutorialSeen = d.tutorialSeen || false;
+    g.tutorialFlags = { goldStar: false, achievement: false, offSeason: false, ...(d.tutorialFlags || {}) };
     g.farm = Farm.deserialize(d.farm);
     g.player = Player.deserialize(d.player);
 

@@ -1,4 +1,4 @@
-import { TILE_SIZE, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE, BUILDINGS, VILLAGE_ARC } from './constants.js';
+import { TILE_SIZE, ZOOM, CROPS, SKINS, HOME_COLS, HOME_ROWS, FURNITURE, SEASONS, ANIMALS, PALETTE, BUILDINGS, VILLAGE_ARC } from './constants.js';
 
 // Deterministic pseudo-random per tile position
 function pr(x, y, s = 0) {
@@ -96,6 +96,7 @@ export class Renderer {
     this._drawWildBackground(ctx, farm);
 
     ctx.save();
+    ctx.scale(ZOOM, ZOOM);            // zoom in on the world (before translate)
     ctx.translate(-farm.camX, -farm.camY);
 
     // Dirt path border framing the plot
@@ -2149,6 +2150,8 @@ export class Renderer {
 
   // Returns the NPC or hotspot under a screen point (for tap-to-interact), or null.
   npcAt(screenX, screenY) {
+    // Stored rects are in world-offset units (nx - camX); divide the tap by ZOOM.
+    screenX /= ZOOM; screenY /= ZOOM;
     const inRect = (r) => screenX >= r.sx && screenX <= r.sx + r.sw &&
                           screenY >= r.sy && screenY <= r.sy + r.sh;
     if (this._npcRects) {
@@ -2528,8 +2531,8 @@ export class Renderer {
 
   isPondClick(screenX, screenY, farm) {
     if (!this._pondScreenX) return false;
-    const px = screenX - (this._pondScreenX - farm.camX);
-    const py = screenY - (this._pondScreenY - farm.camY);
+    const px = screenX / ZOOM - (this._pondScreenX - farm.camX);
+    const py = screenY / ZOOM - (this._pondScreenY - farm.camY);
     return px >= 0 && py >= 0 && px <= this._pondW && py <= this._pondH;
   }
 
@@ -2721,8 +2724,8 @@ export class Renderer {
   // ── Coordinate helpers ───────────────────────────────────────────────────────
 
   pixelToTile(farm, screenX, screenY) {
-    const wx = screenX + farm.camX;
-    const wy = screenY + farm.camY;
+    const wx = screenX / ZOOM + farm.camX;
+    const wy = screenY / ZOOM + farm.camY;
     return { tileX: Math.floor(wx / TILE_SIZE), tileY: Math.floor(wy / TILE_SIZE) };
   }
 

@@ -73,23 +73,26 @@ export class Farm {
     const tile = this.getTile(x, y);
     if (!tile || tile.type !== 'tilled' || tile.crop) return false;
     tile.type = 'planted';
-    tile.crop = { kind, stage: 0, totalGrownMs: 0, lastWateredAt: Date.now(), isDry: false };
+    // D.1: wasEverDry tracks "well-tended" — never let to dry → small quality bonus at harvest.
+    tile.crop = { kind, stage: 0, totalGrownMs: 0, lastWateredAt: Date.now(), isDry: false, wasEverDry: false };
     return true;
   }
 
   harvest(x, y, aoe = 1) {
     const targets = this._aoeTiles(x, y, aoe);
     const harvested = {};
+    const wellTended = {};   // D.1: per-kind count of crops that were never dry
     targets.forEach(({ x: tx, y: ty }) => {
       const tile = this.getTile(tx, ty);
       if (tile && tile.crop && tile.crop.stage >= 3) {
         const kind = tile.crop.kind;
         harvested[kind] = (harvested[kind] || 0) + 1;
+        if (!tile.crop.wasEverDry) wellTended[kind] = (wellTended[kind] || 0) + 1;
         tile.type = 'tilled';
         tile.crop = null;
       }
     });
-    return harvested;
+    return { harvested, wellTended };
   }
 
   // Called every frame — advances real-time crop growth.
@@ -108,6 +111,7 @@ export class Farm {
           crop.isDry = false;
         } else if (!crop.isDry && (now - crop.lastWateredAt) > def.waterIntervalMs) {
           crop.isDry = true;
+          crop.wasEverDry = true;   // D.1: lose the "well-tended" bonus once dry
         }
         // Season factor (off-season = slower) × drought factor (dry = slower,
         // not frozen). Watering clears isDry and restores full speed.

@@ -4,7 +4,7 @@ import { UI } from './ui.js';
 import { Input } from './input.js';
 import { loadGame } from './save.js';
 import { checkStripeReturn } from './iap.js';
-import { CROPS, TILE_SIZE, BUILDINGS, SEASONS, SEASON_ICONS } from './constants.js';
+import { CROPS, TILE_SIZE, ZOOM, BUILDINGS, SEASONS, SEASON_ICONS } from './constants.js';
 import * as audio from './audio.js';
 import * as particles from './particles.js';
 
@@ -16,6 +16,9 @@ let lastTime = 0;
 let saveInterval = 0;
 let leafTimer = 0;
 let rafId = 0;
+// A.2: per-day off-season notify debounce (one toast per crop kind per game day)
+let offSeasonNoticedKinds = new Set();
+let offSeasonNoticedDay   = -1;
 
 // A backgrounded tab freezes rAF; on return the first frame's elapsed time
 // can be huge. Cap it so we never inject more than one slow frame of physics
@@ -108,6 +111,14 @@ function loop(timestamp) {
   ui.updateHUD(game);
   syncSeedCarousel();
   updateTalkBtn();
+  updateSleepBtn();
+  // A.3: pause day-clock while any modal is open or off the farm view
+  game.timePaused = !!document.querySelector('.modal.active') || currentView !== 'farm';
+  // B.3: surface the one-time achievement tutorial when it's been flagged
+  if (game._pendingAchievementTutorial) {
+    game._pendingAchievementTutorial = false;
+    ui.notify('🏆 New achievement ready! Talk to the Mayor → Collection tab to claim.');
+  }
 
   saveInterval += dt;
   if (saveInterval > 30000) { game.autoSave(); saveInterval = 0; }
@@ -171,7 +182,23 @@ function findNearbyNpc() {
 function interactWith(npc) {
   // Hotspots (own home/barn) skip the dialogue line — you just enter your own place.
   if (!npc.isHotspot) {
-    const lines = npc.lines || (npc.line ? [npc.line] : ['Hello!']);
+    // D.3: build a contextual line pool from game state so NPCs react to progress.
+    const baseLines = npc.lines || (npc.line ? [npc.line] : ['Hello!']);
+    const ctx = [];
+    if (npc.action === 'quests') {
+      if (game.unclaimedQuestCount() + game.unclaimedAchievementCount() > 0) ctx.push("Got something for you! Check the board.");
+      if (game.milestones.goldCropsHarvested >= 10) ctx.push("Heard about your gold harvest — impressive work.");
+    } else if (npc.action === 'market') {
+      if (game.coins < 50) ctx.push("Tight on coins, eh? Wheat's a safe bet — fast and reliable.");
+    } else if (npc.action === 'gems') {
+      if (game.gems < 5) ctx.push("Don't miss tomorrow's login — daily gems add up!");
+    } else if (npc.action === 'upgrades') {
+      if ((game.staminaTier || 1) < 3) ctx.push("Stamina upgrades are worth every coin.");
+    } else if (npc.action === 'skins') {
+      if ((game.ownedSkins?.length || 0) <= 2) ctx.push("First skin's just one fitting away.");
+    }
+    // 50% chance to use a contextual line when one applies, else random base line.
+    const lines = ctx.length > 0 && Math.random() < 0.5 ? ctx : baseLines;
     const line = lines[Math.floor(Math.random() * lines.length)];
     ui.notify(`${npc.name}: ${line}`, 2600);
   }
@@ -188,7 +215,14 @@ function interactWith(npc) {
         renderer.shake(5, 200);
       }
     };
-    ui.openQuestLog(game, claimFn);
+    const claimAchFn = (id) => {
+      if (game.claimAchievement(id)) {
+        audio.playQuestComplete();
+        particles.emit(renderer.w / 2, renderer.h / 2, 'levelUp');
+        renderer.shake(5, 200);
+      }
+    };
+    ui.openQuestLog(game, claimFn, claimAchFn);
   } else if (a === 'barn') {
     currentView = 'barn';
     const feedAnimalFn = (id) => { if (game.feedAnimal(id)) audio.playFeed(); };
@@ -243,9 +277,10 @@ function handleCanvasClick(screenX, screenY) {
 }
 
 function _tileScreenCenter(tx, ty) {
+  // Project the tile center through the world zoom — particles are drawn in screen space.
   return {
-    px: tx * TILE_SIZE - game.farm.camX + TILE_SIZE / 2,
-    py: ty * TILE_SIZE - game.farm.camY + TILE_SIZE / 2,
+    px: (tx * TILE_SIZE - game.farm.camX + TILE_SIZE / 2) * ZOOM,
+    py: (ty * TILE_SIZE - game.farm.camY + TILE_SIZE / 2) * ZOOM,
   };
 }
 
@@ -286,7 +321,27 @@ function useTool(tx, ty) {
     particles.emit(px, py, 'water');
     didAct = true;
   } else if (player.tool === 'seed') {
-    const kind = player.selectedSeed;
+    let kind = player.selectedSeed;
+    // B.4: out-of-seed → auto-cycle to next owned seed (or notify if none)
+    if ((game.seedInventory[kind] || 0) === 0) {
+      const keys = Object.keys(CROPS);
+      const startIdx = keys.indexOf(kind);
+      let foundKind = null;
+      for (let i = 1; i <= keys.length; i++) {
+        const k = keys[(startIdx + i) % keys.length];
+        if ((game.seedInventory[k] || 0) > 0) { foundKind = k; break; }
+      }
+      if (foundKind) {
+        const oldLabel = CROPS[kind]?.label || kind;
+        player.selectedSeed = foundKind;
+        kind = foundKind;
+        syncSeedCarousel();
+        ui.notify(`Switched to ${CROPS[foundKind].label} — out of ${oldLabel}.`);
+      } else {
+        ui.notify('No seeds — buy more at the Market.');
+        return;
+      }
+    }
     if ((game.seedInventory[kind] || 0) > 0) {
       if (farm.plant(tx, ty, kind)) {
         game.seedInventory[kind]--;
@@ -294,24 +349,48 @@ function useTool(tx, ty) {
         particles.emit(px, py, 'plant');
         didAct = true;
         if (!game.isInSeason(kind)) {
-          ui.notify(`🌱 ${CROPS[kind].label} is out of season — slower growth & lower yield.`);
+          // A.2 debounce: one toast per (kind, game day)
+          if (game.day !== offSeasonNoticedDay) { offSeasonNoticedKinds.clear(); offSeasonNoticedDay = game.day; }
+          if (!offSeasonNoticedKinds.has(kind)) {
+            offSeasonNoticedKinds.add(kind);
+            ui.notify(`🌱 ${CROPS[kind].label} is out of season — slower growth & lower yield.`);
+            // B.3 one-time tutorial on first ever off-season plant
+            if (!game.tutorialFlags.offSeason) {
+              game.tutorialFlags.offSeason = true;
+              setTimeout(() => ui.notify('💡 You can plant anything anytime — off-season just grows slower.'), 1200);
+            }
+          }
         }
       } else {
         ui.notify('Tile must be tilled first!');
       }
-    } else {
-      ui.notify(`No ${CROPS[kind]?.label} seeds! Buy more in the Market.`);
     }
   } else if (player.tool === 'scythe') {
     const aoe = game.getToolAoe('harvester');
-    const harvested = farm.harvest(tx, ty, aoe);
-    const total = game.addHarvest(harvested);
+    const { harvested, wellTended } = farm.harvest(tx, ty, aoe);
+    const total = game.addHarvest(harvested, wellTended);
     if (total > 0) {
-      const names = Object.entries(harvested).map(([k, v]) => `${v} ${CROPS[k]?.label}`).join(', ');
+      // B.1 — append quality stars per crop kind, e.g. "3 Wheat (🥇1 🥈1)"
+      const names = Object.entries(harvested).map(([k, v]) => {
+        const q = game._lastHarvestQuality?.[k];
+        const stars = q && (q.gold || q.silver)
+          ? ` (${q.gold ? `🥇${q.gold}` : ''}${q.gold && q.silver ? ' ' : ''}${q.silver ? `🥈${q.silver}` : ''})`
+          : '';
+        return `${v} ${CROPS[k]?.label}${stars}`;
+      }).join(', ');
       let msg = `Harvested: ${names}!`;
       if (game._lastHarvestBonus) {
         const bonusStr = Object.entries(game._lastHarvestBonus).map(([k,v])=>`+${v} ${CROPS[k]?.label}`).join(', ');
         msg += ` ☔ Weather bonus: ${bonusStr}`;
+      }
+      if (game._lastHarvestGold > 0) {
+        particles.emit(px, py, 'levelUp');
+        audio.playCoin();
+        // B.3 one-time tutorial: first gold-star harvest
+        if (!game.tutorialFlags.goldStar) {
+          game.tutorialFlags.goldStar = true;
+          setTimeout(() => ui.notify('✨ Gold-star crops sell for 50% more at the Market!'), 1200);
+        }
       }
       ui.notify(msg);
       audio.playHarvest();
@@ -343,11 +422,25 @@ function checkGameEvents() {
 }
 
 function doSleep() {
+  const t = game.timeOfDay ?? 0.5;
+  if (t < 0.72 && game.energy > 0) {
+    ui.notify("It's too early to sleep. Work the day, or burn through your energy first.");
+    return;
+  }
   renderer.flashScreen('#000020', 320);
   game.sleepToNextDay();
   const weatherIcons = { sunny: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️' };
   const icon = weatherIcons[game.weather] || '🌅';
   ui.notify(`⏭️ Day ${game.day} · ${icon} ${game.weather} · ⚡${game.energy}/${game.maxEnergy}`);
+}
+
+function updateSleepBtn() {
+  const btn = document.getElementById('btn-sleep');
+  if (!btn) return;
+  const t = game.timeOfDay ?? 0.5;
+  const canSleep = t >= 0.72 || game.energy === 0;
+  btn.disabled = !canSleep;
+  btn.textContent = !canSleep ? '💤 Sleep (eve)' : (game.energy === 0 ? '💤 Sleep (exhausted)' : '💤 Sleep');
 }
 
 function openFishingGame() {
@@ -371,11 +464,14 @@ function openFishingGame() {
 function openShopModal() {
   ui.openShop(game,
     (kind, n) => game.buySeed(kind, n),
-    (kind, n) => {
-      const ok = game.sellCrop(kind, n);
-      if (ok) { audio.playCoin(); particles.emit(renderer.w / 2, renderer.h / 2, 'coin'); }
-      return ok;
-    }
+    (kind, n) => game.sellCrop(kind, n),
+    'seeds',
+    // B.2: every sale (crops / artisan / animal / fish) gets coin sound + particle + small shake
+    () => {
+      audio.playCoin();
+      particles.emit(renderer.w / 2, renderer.h / 2, 'coin');
+      renderer.shake(2, 80);
+    },
   );
 }
 
@@ -421,10 +517,11 @@ function snapCamera() {
   const worldMinY = b.minY * TILE_SIZE;
   const worldW = (b.maxX - b.minX) * TILE_SIZE;
   const worldH = (b.maxY - b.minY) * TILE_SIZE;
-  const targetCamX = game.player.gridX * TILE_SIZE - canvasW / 2 + TILE_SIZE / 2;
-  const targetCamY = game.player.gridY * TILE_SIZE - canvasH / 2 + TILE_SIZE / 2;
-  farm.camX = Math.max(worldMinX, Math.min(targetCamX, worldMinX + Math.max(0, worldW - canvasW)));
-  farm.camY = Math.max(worldMinY, Math.min(targetCamY, worldMinY + Math.max(0, worldH - canvasH)));
+  const viewW = canvasW / ZOOM, viewH = canvasH / ZOOM;   // visible world shrinks when zoomed
+  const targetCamX = game.player.gridX * TILE_SIZE - viewW / 2 + TILE_SIZE / 2;
+  const targetCamY = game.player.gridY * TILE_SIZE - viewH / 2 + TILE_SIZE / 2;
+  farm.camX = Math.max(worldMinX, Math.min(targetCamX, worldMinX + Math.max(0, worldW - viewW)));
+  farm.camY = Math.max(worldMinY, Math.min(targetCamY, worldMinY + Math.max(0, worldH - viewH)));
 }
 
 function clampCamera() {
@@ -437,11 +534,12 @@ function clampCamera() {
   const worldW = (b.maxX - b.minX) * TILE_SIZE;
   const worldH = (b.maxY - b.minY) * TILE_SIZE;
 
-  const targetCamX = game.player.gridX * TILE_SIZE - canvasW / 2 + TILE_SIZE / 2;
-  const targetCamY = game.player.gridY * TILE_SIZE - canvasH / 2 + TILE_SIZE / 2;
+  const viewW = canvasW / ZOOM, viewH = canvasH / ZOOM;   // visible world shrinks when zoomed
+  const targetCamX = game.player.gridX * TILE_SIZE - viewW / 2 + TILE_SIZE / 2;
+  const targetCamY = game.player.gridY * TILE_SIZE - viewH / 2 + TILE_SIZE / 2;
 
-  const clampedX = Math.max(worldMinX, Math.min(targetCamX, worldMinX + Math.max(0, worldW - canvasW)));
-  const clampedY = Math.max(worldMinY, Math.min(targetCamY, worldMinY + Math.max(0, worldH - canvasH)));
+  const clampedX = Math.max(worldMinX, Math.min(targetCamX, worldMinX + Math.max(0, worldW - viewW)));
+  const clampedY = Math.max(worldMinY, Math.min(targetCamY, worldMinY + Math.max(0, worldH - viewH)));
 
   // Smooth camera follow (lerp) — feels like Stardew Valley instead of instant snap
   farm.camX += (clampedX - farm.camX) * 0.14;
